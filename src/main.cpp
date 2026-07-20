@@ -309,6 +309,7 @@ void loop()
           if (tevent == WavinController::RELAY_EVENT_OUTPUT_ON) pumpMode = "heating";
           else if (tevent == WavinController::RELAY_EVENT_STOP_DELAY) pumpMode = "stop_delay";
           else if (tevent == WavinController::RELAY_EVENT_PERIODIC_CYCLE) pumpMode = "exercise";
+          else if (tevent == WavinController::RELAY_EVENT_IDLE) pumpMode = "idle";
 
           String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/pump_running");
           mqttClient.publish(topic.c_str(), running ? "True" : "False", true);

@@ -48,9 +48,45 @@ class WavinController
     static const uint8_t  NUMBER_OF_CHANNELS = 16;
     static const uint8_t  CHANNELS_TIMER_EVENT = 0x00;
     static const uint16_t CHANNELS_TIMER_EVENT_OUTP_ON_MASK = 0x0010;
+    static const uint8_t  CHANNELS_CURRENT_CONSUMPTION = 0x01;
     static const uint8_t  CHANNELS_PRIMARY_ELEMENT = 0x02;
     static const uint16_t CHANNELS_PRIMARY_ELEMENT_ELEMENT_MASK = 0x003f;
     static const uint16_t CHANNELS_PRIMARY_ELEMENT_ALL_TP_LOST_MASK = 0x0400;
+    
+    static const uint8_t RELAY_TIMER_EVENT     = 0x00;
+    static const uint8_t RELAY_ASSIGNMENT_MAP  = 0x01;
+    static const uint8_t RELAY_START_DELAY     = 0x02;
+    static const uint8_t RELAY_STOP_DELAY      = 0x03;
+    static const uint8_t RELAY_ACT_INTERVAL    = 0x04;
+    static const uint8_t RELAY_ACT_DURATION    = 0x05;
+    static const uint8_t RELAY_TIMER           = 0x06; // reserved
+
+    static const uint8_t RELAY_EVENT_OUTPUT_ON        = 0x07;
+    static const uint8_t RELAY_EVENT_STOP_DELAY       = 0x0A;
+    static const uint8_t RELAY_EVENT_PERIODIC_CYCLE   = 0x0D;
+
+    static const uint8_t MAIN_STATUS_L                 = 0x08;
+    static const uint8_t MAIN_DHW_SENSOR_TEMP          = 0x0E; // not used in your setup
+    static const uint8_t MAIN_INLET_SENSOR_TEMP        = 0x0F;
+    static const uint8_t MAIN_TOTAL_CURRENT_L          = 0x10;
+    static const uint8_t MAIN_TOTAL_CURRENT_H          = 0x11;
+    static const uint8_t MAIN_ACTUATOR_ACT_INTERVAL    = 0x1C;
+    static const uint8_t MAIN_ACTUATOR_ACT_DURATION    = 0x1D;
+    static const uint8_t MAIN_ACTUATOR_POLARITY        = 0x1E;
+
+    static const uint8_t EL_ADDRESS_L         = 0x00;
+    static const uint8_t EL_ADDRESS_H         = 0x01;
+    static const uint8_t EL_ASSIGNMENT_MAP_L  = 0x02;
+    static const uint8_t EL_ASSIGNMENT_MAP_H  = 0x03;
+    static const uint8_t EL_AIR_TEMP          = 0x04;
+    static const uint8_t EL_FLOOR_TEMP        = 0x05; // likely unused in your setup
+    static const uint8_t EL_DEW_POINT         = 0x06;
+    static const uint8_t EL_HUMIDITY          = 0x07;
+    static const uint8_t EL_STATUS            = 0x08;
+    static const uint8_t EL_RSSI              = 0x09;
+    static const uint8_t EL_BATTERY           = 0x0A;
+    static const uint8_t EL_SYNC_GROUP        = 0x0B;
+    static const uint8_t EL_LIVE_TIMER        = 0x0C;
     
   private:
     uint8_t txEnablePin;

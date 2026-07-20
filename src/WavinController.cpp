@@ -169,7 +169,7 @@ bool WavinController::getPumpState(uint8_t& tevent)
 {
     uint16_t raw;
 
-    if (!readRegisters(CATEGORY_RELAYS, 0, 0x00, 1, &raw)) {
+    if (!readRegisters(CATEGORY_RELAYS, 0, RELAY_TIMER_EVENT, 1, &raw)) {
         return false;
     }
 
@@ -182,7 +182,7 @@ bool WavinController::getInletTemperature(float& temp)
     uint16_t status;
 
     // MAIN STATUS = 0x08
-    if (!readRegisters(CATEGORY_MAIN, 0, 0x08, 1, &status)) {
+    if (!readRegisters(CATEGORY_MAIN, 0, MAIN_STATUS_L, 1, &status)) {
         return false;
     }
 
@@ -194,7 +194,7 @@ bool WavinController::getInletTemperature(float& temp)
     uint16_t raw;
 
     // INLET TEMP = 0x0F
-    if (!readRegisters(CATEGORY_MAIN, 0, 0x0F, 1, &raw)) {
+    if (!readRegisters(CATEGORY_MAIN, 0, MAIN_INLET_SENSOR_TEMP, 1, &raw)) {
         return false;
     }
 
@@ -216,25 +216,25 @@ bool WavinController::getElementData(
     uint16_t raw;
 
     // Temperature = 0x04
-    if (readRegisters(CATEGORY_ELEMENTS, el, 0x04, 1, &raw) && raw != 0x7FFF)
+    if (readRegisters(CATEGORY_ELEMENTS, el, EL_AIR_TEMP, 1, &raw) && raw != 0x7FFF)
         temp = raw / 10.0f;
     else
         temp = NAN;
 
     // Humidity = 0x07
-    if (readRegisters(CATEGORY_ELEMENTS, el, 0x07, 1, &raw) && raw != 0x7FFF)
+    if (readRegisters(CATEGORY_ELEMENTS, el, EL_HUMIDITY, 1, &raw) && raw != 0x7FFF)
         hum = raw;
     else
         hum = NAN;
 
     // Dew point = 0x06
-    if (readRegisters(CATEGORY_ELEMENTS, el, 0x06, 1, &raw) && raw != 0x7FFF)
+    if (readRegisters(CATEGORY_ELEMENTS, el, EL_DEW_POINT, 1, &raw) && raw != 0x7FFF)
         dew = raw / 10.0f;
     else
         dew = NAN;
 
     // RSSI = 0x09
-    if (readRegisters(CATEGORY_ELEMENTS, el, 0x09, 1, &raw)) {
+    if (readRegisters(CATEGORY_ELEMENTS, el, EL_RSSI, 1, &raw)) {
         int8_t rssiRaw = raw & 0xFF;
         rssi = -74.0f + (rssiRaw * 0.5f);
     } else {
@@ -248,7 +248,7 @@ bool WavinController::getChannelCurrent(uint8_t ch, float& current)
 {
     uint16_t raw;
 
-    if (!readRegisters(CATEGORY_CHANNELS, ch, 0x01, 1, &raw)) {
+    if (!readRegisters(CATEGORY_CHANNELS, ch, CHANNELS_CURRENT_CONSUMPTION, 1, &raw)) {
         return false;
     }
 
@@ -258,24 +258,11 @@ bool WavinController::getChannelCurrent(uint8_t ch, float& current)
 
 bool WavinController::getActuatorMotion(uint16_t& interval, uint16_t& duration)
 {
-    if (!readRegisters(CATEGORY_MAIN, 0, 0x1C, 1, &interval)) {
+    if (!readRegisters(CATEGORY_MAIN, 0, MAIN_ACTUATOR_ACT_INTERVAL, 1, &interval)) {
         return false;
     }
 
-    if (!readRegisters(CATEGORY_MAIN, 0, 0x1D, 1, &duration)) {
-        return false;
-    }
-
-    return true;
-}
-
-bool WavinController::getActuatorMotion(uint16_t& interval, uint16_t& duration)
-{
-    if (!readRegisters(CATEGORY_MAIN, 0, 0x1C, 1, &interval)) {
-        return false;
-    }
-
-    if (!readRegisters(CATEGORY_MAIN, 0, 0x1D, 1, &duration)) {
+    if (!readRegisters(CATEGORY_MAIN, 0, MAIN_ACTUATOR_ACT_DURATION, 1, &duration)) {
         return false;
     }
 

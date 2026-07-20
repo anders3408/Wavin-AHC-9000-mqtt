@@ -298,12 +298,17 @@ void loop()
           // 0x07 = OUTPUT_ON
           // 0x0A = STOP_DELAY_TIMER
           // 0x0D = PERIODIC_CYCLE_TIMER
-          bool running = (tevent == 0x07 || tevent == 0x0A || tevent == 0x0D);
+          bool running = (
+            tevent == WavinController::RELAY_EVENT_OUTPUT_ON ||
+            tevent == WavinController::RELAY_EVENT_STOP_DELAY ||
+            tevent == WavinController::RELAY_EVENT_PERIODIC_CYCLE
+        );
+
 
           String pumpMode = "idle";
-          if (tevent == 0x07) pumpMode = "heating";
-          else if (tevent == 0x0A) pumpMode = "stop_delay";
-          else if (tevent == 0x0D) pumpMode = "exercise";
+          if (tevent == WavinController::RELAY_EVENT_OUTPUT_ON) pumpMode = "heating";
+          else if (tevent == WavinController::RELAY_EVENT_STOP_DELAY) pumpMode = "stop_delay";
+          else if (tevent == WavinController::RELAY_EVENT_PERIODIC_CYCLE) pumpMode = "exercise";
 
           String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/pump_running");
           mqttClient.publish(topic.c_str(), running ? "True" : "False", true);
@@ -398,19 +403,7 @@ void loop()
 
             publishIfNewValue(topic, payload, status, &(lastSentValues[channel].status));
           }
-
-          // ==========================
-          // Channel current (NEW)
-          // ==========================
-          if (wavinController.readRegisters(WavinController::CATEGORY_CHANNELS, channel, 0x01, 1, registers))
-          {
-            uint16_t currentRaw = registers[0];
-            String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/current");
-            String payload = String(currentRaw * 0.54f, 2);
-
-            publishIfNewValue(topic, payload, currentRaw, &(lastSentValues[channel].currentRaw));
-          }
-
+          
           // ==========================
           // Channel alarms (NEW)
           // ==========================
@@ -431,7 +424,10 @@ void loop()
                               &(lastSentValues[channel].alarmLow));
           }
 
-          if (wavinController.readRegisters(WavinController::CATEGORY_CHANNELS, channel, 0x01, 1, registers))
+          // ==========================
+          // Channel current (NEW)
+          // ==========================
+          if (wavinController.readRegisters(WavinController::CATEGORY_CHANNELS, channel, WavinController::CHANNELS_CURRENT_CONSUMPTION, 1, registers))
           {
             uint16_t currentRaw = registers[0];
 
@@ -506,6 +502,7 @@ void loop()
               }
             }
           }
+        }
 
         // Process incomming messages and maintain connection to the server
         if(!mqttClient.loop())

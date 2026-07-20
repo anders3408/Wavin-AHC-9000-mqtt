@@ -64,6 +64,7 @@ class WavinController
     static const uint8_t RELAY_EVENT_OUTPUT_ON        = 0x07;
     static const uint8_t RELAY_EVENT_STOP_DELAY       = 0x0A;
     static const uint8_t RELAY_EVENT_PERIODIC_CYCLE   = 0x0D;
+    static const uint8_t RELAY_EVENT_IDLE             = 0x00;
 
     static const uint8_t MAIN_STATUS_L                 = 0x08;
     static const uint8_t MAIN_DHW_SENSOR_TEMP          = 0x0E; // not used in your setup

@@ -173,6 +173,7 @@ void publishConfiguration(uint8_t channel)
   String climateTopic = String("homeassistant/climate/" + mqttDeviceNameWithMac + "/" + channel + "/config");
   String climateMessage = String(
     "{\"name\": \"" +mqttDeviceNameWithMac + "_" + channel +  "_climate\", "
+    "\"unique_id\": \"" + mqttDeviceNameWithMac + "_" + channel +  "_climate_id\", "
     "\"action_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_OUTPUT + "\", " 
     "\"current_temperature_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_CURRENT + "\", " 
     "\"temperature_command_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_SETPOINT_SET + "\", " 
@@ -183,12 +184,16 @@ void publishConfiguration(uint8_t channel)
     "\"availability_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE +"\", "
     "\"payload_available\": \"True\", "
     "\"payload_not_available\": \"False\", "
+    "\"min_temp\": \"" + String(MIN_TEMP, 1) + "\", "
+    "\"max_temp\": \"" + String(MAX_TEMP, 1) + "\", "
+    "\"temp_step\": \"" + String(TEMP_STEP, 1) + "\", "
     "\"qos\": \"0\"}"
   );
   
   String batteryTopic = String("homeassistant/sensor/" + mqttDeviceNameWithMac + "/" + channel + "/config");
   String batteryMessage = String(
     "{\"name\": \"" +mqttDeviceNameWithMac + "_" + channel +  "_battery\", "
+    "\"unique_id\": \"" + mqttDeviceNameWithMac + "_" + channel +  "_battery_id\", "
     "\"state_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/battery\", " 
     "\"availability_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE +"\", "
     "\"payload_available\": \"True\", "

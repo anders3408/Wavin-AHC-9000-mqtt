@@ -164,3 +164,120 @@ bool WavinController::writeMaskedRegister(uint8_t category, uint8_t page, uint8_
   uint16_t reply[1];
   return recieve(reply, MODBUS_WRITE_MASKED_REGISTER); // Recieve reply but ignore it. Asume it's ok
 }
+
+bool WavinController::getPumpState(uint8_t& tevent)
+{
+    uint16_t raw;
+
+    if (!readRegisters(CATEGORY_RELAYS, 0, 0x00, 1, &raw)) {
+        return false;
+    }
+
+    tevent = raw & 0x0F;
+    return true;
+}
+
+bool WavinController::getInletTemperature(float& temp)
+{
+    uint16_t status;
+
+    // MAIN STATUS = 0x08
+    if (!readRegisters(CATEGORY_MAIN, 0, 0x08, 1, &status)) {
+        return false;
+    }
+
+    // Check "INLET SENSOR PRESENT" (bit 11)
+    if (!(status & (1 << 11))) {
+        return false;
+    }
+
+    uint16_t raw;
+
+    // INLET TEMP = 0x0F
+    if (!readRegisters(CATEGORY_MAIN, 0, 0x0F, 1, &raw)) {
+        return false;
+    }
+
+    if (raw == 0x7FFF) {
+        return false;
+    }
+
+    temp = raw / 10.0f;
+    return true;
+}
+
+bool WavinController::getElementData(
+    uint8_t el,
+    float& temp,
+    float& hum,
+    float& dew,
+    float& rssi)
+{
+    uint16_t raw;
+
+    // Temperature = 0x04
+    if (readRegisters(CATEGORY_ELEMENTS, el, 0x04, 1, &raw) && raw != 0x7FFF)
+        temp = raw / 10.0f;
+    else
+        temp = NAN;
+
+    // Humidity = 0x07
+    if (readRegisters(CATEGORY_ELEMENTS, el, 0x07, 1, &raw) && raw != 0x7FFF)
+        hum = raw;
+    else
+        hum = NAN;
+
+    // Dew point = 0x06
+    if (readRegisters(CATEGORY_ELEMENTS, el, 0x06, 1, &raw) && raw != 0x7FFF)
+        dew = raw / 10.0f;
+    else
+        dew = NAN;
+
+    // RSSI = 0x09
+    if (readRegisters(CATEGORY_ELEMENTS, el, 0x09, 1, &raw)) {
+        int8_t rssiRaw = raw & 0xFF;
+        rssi = -74.0f + (rssiRaw * 0.5f);
+    } else {
+        rssi = NAN;
+    }
+
+    return true;
+}
+
+bool WavinController::getChannelCurrent(uint8_t ch, float& current)
+{
+    uint16_t raw;
+
+    if (!readRegisters(CATEGORY_CHANNELS, ch, 0x01, 1, &raw)) {
+        return false;
+    }
+
+    current = raw * 0.54f;
+    return true;
+}
+
+bool WavinController::getActuatorMotion(uint16_t& interval, uint16_t& duration)
+{
+    if (!readRegisters(CATEGORY_MAIN, 0, 0x1C, 1, &interval)) {
+        return false;
+    }
+
+    if (!readRegisters(CATEGORY_MAIN, 0, 0x1D, 1, &duration)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool WavinController::getActuatorMotion(uint16_t& interval, uint16_t& duration)
+{
+    if (!readRegisters(CATEGORY_MAIN, 0, 0x1C, 1, &interval)) {
+        return false;
+    }
+
+    if (!readRegisters(CATEGORY_MAIN, 0, 0x1D, 1, &duration)) {
+        return false;
+    }
+
+    return true;
+}

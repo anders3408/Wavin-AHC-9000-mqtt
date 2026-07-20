@@ -9,6 +9,22 @@ class WavinController
     bool writeRegister(uint8_t category, uint8_t page, uint8_t index, uint16_t value);
     bool writeMaskedRegister(uint8_t category, uint8_t page, uint8_t index, uint16_t value, uint16_t mask);
 
+    // NEW helper methods
+    bool getPumpState(uint8_t& tevent);
+    bool getInletTemperature(float& temp);
+
+    bool getElementData(
+        uint8_t el,
+        float& temp,
+        float& hum,
+        float& dew,
+        float& rssi
+    );
+
+    bool getChannelCurrent(uint8_t ch, float& current);
+    bool getActuatorMotion(uint16_t& interval, uint16_t& duration);
+    bool getChannelAlarms(uint8_t ch, bool& high, bool& low);
+    
     static const uint8_t CATEGORY_MAIN =        0x00;
     static const uint8_t CATEGORY_ELEMENTS =    0x01;
     static const uint8_t CATEGORY_PACKED_DATA = 0x02;

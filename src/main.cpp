@@ -48,6 +48,15 @@ struct lastKnownValue_t {
   uint16_t battery;
   uint16_t status;
   uint16_t mode;
+
+  // NEW fields
+  uint16_t dewPoint;
+  uint16_t humidity;
+  uint16_t rssiRaw;
+  uint16_t currentRaw;
+  uint16_t alarmHigh;
+  uint16_t alarmLow;
+
 } lastSentValues[WavinController::NUMBER_OF_CHANNELS];
 
 const uint16_t LAST_VALUE_UNKNOWN = 0xFFFF;
@@ -144,6 +153,13 @@ void resetLastSentValues()
     lastSentValues[i].battery = LAST_VALUE_UNKNOWN;
     lastSentValues[i].status = LAST_VALUE_UNKNOWN;
     lastSentValues[i].mode = LAST_VALUE_UNKNOWN;
+
+    lastSentValues[i].dewPoint   = LAST_VALUE_UNKNOWN;
+    lastSentValues[i].humidity   = LAST_VALUE_UNKNOWN;
+    lastSentValues[i].rssiRaw    = LAST_VALUE_UNKNOWN;
+    lastSentValues[i].currentRaw = LAST_VALUE_UNKNOWN;
+    lastSentValues[i].alarmHigh  = LAST_VALUE_UNKNOWN;
+    lastSentValues[i].alarmLow   = LAST_VALUE_UNKNOWN;
 
     configurationPublished[i] = false;
   }
@@ -270,6 +286,53 @@ void loop()
     {
       lastUpdateTime = millis();
 
+      // =========================
+      // Global/system-wide values
+      // =========================
+
+      {
+        uint8_t tevent;
+        if (wavinController.getPumpState(tevent))
+        {
+          // Relay timer event:
+          // 0x07 = OUTPUT_ON
+          // 0x0A = STOP_DELAY_TIMER
+          // 0x0D = PERIODIC_CYCLE_TIMER
+          bool running = (tevent == 0x07 || tevent == 0x0A || tevent == 0x0D);
+
+          String pumpMode = "idle";
+          if (tevent == 0x07) pumpMode = "heating";
+          else if (tevent == 0x0A) pumpMode = "stop_delay";
+          else if (tevent == 0x0D) pumpMode = "exercise";
+
+          String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/pump_running");
+          mqttClient.publish(topic.c_str(), running ? "True" : "False", true);
+
+          topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/pump_mode");
+          mqttClient.publish(topic.c_str(), pumpMode.c_str(), true);
+        }
+
+        float inletTemp;
+        if (wavinController.getInletTemperature(inletTemp))
+        {
+          String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/inlet_temperature");
+          String payload = String(inletTemp, 1);
+          mqttClient.publish(topic.c_str(), payload.c_str(), true);
+        }
+
+        uint16_t interval, duration;
+        if (wavinController.getActuatorMotion(interval, duration))
+        {
+          String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/actuator_motion_interval");
+          String payload = String(interval);
+          mqttClient.publish(topic.c_str(), payload.c_str(), true);
+
+          topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/actuator_motion_duration");
+          payload = String(duration);
+          mqttClient.publish(topic.c_str(), payload.c_str(), true);
+        }
+      }
+
       uint16_t registers[11];
 
       for(uint8_t channel = 0; channel < WavinController::NUMBER_OF_CHANNELS; channel++)
@@ -278,6 +341,8 @@ void loop()
         {
           uint16_t primaryElement = registers[0] & WavinController::CHANNELS_PRIMARY_ELEMENT_ELEMENT_MASK;
           bool allThermostatsLost = registers[0] & WavinController::CHANNELS_PRIMARY_ELEMENT_ALL_TP_LOST_MASK;
+          bool alarmHigh = registers[0] & (1 << 9);
+          bool alarmLow  = registers[0] & (1 << 8);
 
           if(primaryElement==0)
           {
@@ -334,28 +399,113 @@ void loop()
             publishIfNewValue(topic, payload, status, &(lastSentValues[channel].status));
           }
 
+          // ==========================
+          // Channel current (NEW)
+          // ==========================
+          if (wavinController.readRegisters(WavinController::CATEGORY_CHANNELS, channel, 0x01, 1, registers))
+          {
+            uint16_t currentRaw = registers[0];
+            String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/current");
+            String payload = String(currentRaw * 0.54f, 2);
+
+            publishIfNewValue(topic, payload, currentRaw, &(lastSentValues[channel].currentRaw));
+          }
+
+          // ==========================
+          // Channel alarms (NEW)
+          // ==========================
+          {
+            uint16_t alarmHighValue = alarmHigh ? 1 : 0;
+            uint16_t alarmLowValue  = alarmLow  ? 1 : 0;
+
+            String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/alarm_high");
+            publishIfNewValue(topic,
+                              alarmHigh ? "True" : "False",
+                              alarmHighValue,
+                              &(lastSentValues[channel].alarmHigh));
+
+            topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/alarm_low");
+            publishIfNewValue(topic,
+                              alarmLow ? "True" : "False",
+                              alarmLowValue,
+                              &(lastSentValues[channel].alarmLow));
+          }
+
+          if (wavinController.readRegisters(WavinController::CATEGORY_CHANNELS, channel, 0x01, 1, registers))
+          {
+            uint16_t currentRaw = registers[0];
+
+            String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/current");
+            String payload = String(currentRaw * 0.54f, 2);
+
+            publishIfNewValue(topic,
+                              payload,
+                              currentRaw,
+                              &(lastSentValues[channel].currentRaw));
+          }
+
           // If a thermostat for the channel is connected to the controller
           if(!allThermostatsLost)
           {
-            // Read values from the primary thermostat connected to this channel 
-            // Primary element from controller is returned as index+1, so 1 i subtracted here to read the correct element
+            // Read values from the primary thermostat connected to this channel
+            // Primary element from controller is returned as index+1, so 1 is subtracted here
             if (wavinController.readRegisters(WavinController::CATEGORY_ELEMENTS, primaryElement-1, 0, 11, registers))
             {
               uint16_t temperature = registers[WavinController::ELEMENTS_AIR_TEMPERATURE];
-              uint16_t battery = registers[WavinController::ELEMENTS_BATTERY_STATUS]; // In 10% steps
+              uint16_t dewPoint    = registers[0x06];
+              uint16_t humidity    = registers[0x07];
+              uint16_t rssiRaw     = registers[0x09];
+              uint16_t battery     = registers[WavinController::ELEMENTS_BATTERY_STATUS]; // In 10% steps
 
+              // Temperature
               String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_CURRENT);
               String payload = temperatureAsFloatString(temperature);
-
               publishIfNewValue(topic, payload, temperature, &(lastSentValues[channel].temperature));
 
+              // Battery
               topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_BATTERY);
-              payload = String(battery*10);
-
+              payload = String(battery * 10);
               publishIfNewValue(topic, payload, battery, &(lastSentValues[channel].battery));
+
+              // Dew point
+              if (dewPoint != LAST_VALUE_UNKNOWN)
+              {
+                topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/dew_point");
+                payload = temperatureAsFloatString(dewPoint);
+
+                publishIfNewValue(topic,
+                                  payload,
+                                  dewPoint,
+                                  &(lastSentValues[channel].dewPoint));
+              }
+
+              // Humidity
+              if (humidity != LAST_VALUE_UNKNOWN)
+              {
+                topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/humidity");
+                payload = String(humidity);
+
+                publishIfNewValue(topic,
+                                  payload,
+                                  humidity,
+                                  &(lastSentValues[channel].humidity));
+              }
+
+              // RSSI
+              {
+                int8_t rssiByte = rssiRaw & 0xFF;
+                float rssi = -74.0f + (rssiByte * 0.5f);
+
+                topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/rssi");
+                payload = String(rssi, 1);
+
+                publishIfNewValue(topic,
+                                  payload,
+                                  rssiRaw,
+                                  &(lastSentValues[channel].rssiRaw));
+              }
             }
-          }         
-        }
+          }
 
         // Process incomming messages and maintain connection to the server
         if(!mqttClient.loop())

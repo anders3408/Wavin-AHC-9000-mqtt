@@ -243,7 +243,7 @@ bool WavinController::getElementData(
 
     return true;
 }
-
+// Get the current consumption of a channel in Amperes but is not inused in the current implementation. It is here for future use. Perhaps
 bool WavinController::getChannelCurrent(uint8_t ch, float& current)
 {
     uint16_t raw;

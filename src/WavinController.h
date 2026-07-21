@@ -34,10 +34,6 @@ class WavinController
     static const uint8_t CATEGORY_SCHEDULES =   0x06;
     static const uint8_t CATEGORY_INFO =        0x07;
 
-    static const uint8_t ELEMENTS_AIR_TEMPERATURE = 0x04;
-    static const uint8_t ELEMENTS_BATTERY_STATUS  = 0x0A;
-    static const uint8_t ELEMENTS_SYNC_GROUP      = 0x0B;
-
     static const uint8_t PACKED_DATA_MANUAL_TEMPERATURE = 0x00;
     static const uint8_t PACKED_DATA_STANDBY_TEMPERATURE = 0x04;
     static const uint8_t PACKED_DATA_CONFIGURATION = 0x07;
@@ -95,9 +91,16 @@ class WavinController
     static const uint8_t  INFO_SW_VERSION_MASK = 0xFF;
     static const uint8_t  INFO_SW_BETA_VERSION_MASK = 0x0F;
 
-    static const uint16_t CH_PRI_ALARM_HIGH = 1 << 9;
-    static const uint16_t CH_PRI_ALARM_LOW = 1 << 8;
-    
+    static const uint16_t CH_PRI_ALARM_HIGH = (1 << 9);
+    static const uint16_t CH_PRI_ALARM_LOW = (1 << 8);
+
+    static const uint16_t ELEMENT_STATUS_ALIVE      = (1 << 15);
+    static const uint16_t ELEMENT_STATUS_LOST       = (1 << 11);
+    static const uint16_t ELEMENT_STATUS_LOW_BATT   = (1 << 10);
+    static const uint16_t ELEMENT_STATUS_TP_ACT     = (1 << 7);
+
+
+
   private:
     uint8_t txEnablePin;
     uint16_t recieveTimeout_ms;

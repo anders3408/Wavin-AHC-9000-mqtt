@@ -7,8 +7,9 @@
 // Esp8266 MAC will be added to the device name, to ensure unique topics
 // Default is topics like 'heat/floorXXXXXXXXXXXX/3/target', where 3 is the output id and XXXXXXXXXXXX is the mac
 const String   MQTT_PREFIX              = "heat/";       // include tailing '/' in prefix
-const String   MQTT_DEVICE_NAME         = "floor";       // only alfanumeric and no '/'
-const String   MQTT_ONLINE              = "/online";      
+const String   MQTT_DEVICE_NAME         = "floor";       // only alfanumeric and no '/'   
+const String   MQTT_ONLINE              = "/online"; 
+const String   MQTT_AVAILABILITY        = "/availability"; // availability topic for Home Assistant
 const String   MQTT_SUFFIX_TEMPERATURE  = "/temperature";    // include heading '/' in all suffixes
 const String   MQTT_SUFFIX_SETPOINT_GET = "/target";
 const String   MQTT_SUFFIX_SETPOINT_SET = "/target_set";
@@ -59,6 +60,10 @@ struct lastKnownValue_t {
   uint16_t alarmLow;
 
   uint16_t roomSensor;
+
+  uint16_t heatDemand;
+  uint16_t lowBattery;
+  uint16_t availability;
 
 } lastSentValues[WavinController::NUMBER_OF_CHANNELS];
 
@@ -176,6 +181,10 @@ void resetLastSentValues()
 
     lastSentValues[i].roomSensor = LAST_VALUE_UNKNOWN;
 
+    lastSentValues[i].heatDemand = LAST_VALUE_UNKNOWN;
+    lastSentValues[i].lowBattery = LAST_VALUE_UNKNOWN;
+    lastSentValues[i].availability = LAST_VALUE_UNKNOWN;
+
     configurationPublished[i] = false;
   }
 }
@@ -212,7 +221,7 @@ void publishConfiguration(uint8_t channel)
 {
   String channelStr = String(channel);
   String baseStateTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channelStr);
-  String availabilityTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE);
+  String availabilityTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_AVAILABILITY);
 
   String deviceJson = String(
     "{"
@@ -429,7 +438,7 @@ void publishConfiguration(uint8_t channel)
       "\"name\":\"" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor\","
       "\"state_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/room_sensor\","
-      "\"availability_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE + "\","
+      "\"availability_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_AVAILABILITY + "\","
       "\"payload_available\":\"True\","
       "\"payload_not_available\":\"False\","
       "\"icon\":\"mdi:home-group\","
@@ -455,7 +464,7 @@ void publishConfiguration(uint8_t channel)
 
 void publishSystemConfiguration()
 {
-  String availabilityTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE);
+  String availabilityTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_AVAILABILITY);
   String baseStateTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system");
 
   String deviceJson = String(
@@ -783,8 +792,8 @@ void loop()
         {
           uint16_t primaryElement = registers[0] & WavinController::CHANNELS_PRIMARY_ELEMENT_ELEMENT_MASK;
           bool allThermostatsLost = registers[0] & WavinController::CHANNELS_PRIMARY_ELEMENT_ALL_TP_LOST_MASK;
-          bool alarmHigh = registers[0] & (WavinController::CH_PRI_ALARM_HIGH);
-          bool alarmLow  = registers[0] & (WavinController::CH_PRI_ALARM_LOW);
+          bool alarmHigh = registers[0] & WavinController::CH_PRI_ALARM_HIGH;
+          bool alarmLow  = registers[0] & WavinController::CH_PRI_ALARM_LOW;
 
           // ==========================
           // Room sensor mapping (NEW)
@@ -912,11 +921,12 @@ void loop()
             // Primary element from controller is returned as index+1, so 1 is subtracted here
             if (wavinController.readRegisters(WavinController::CATEGORY_ELEMENTS, primaryElement-1, 0, 11, registers))
             {
-              uint16_t temperature = registers[WavinController::ELEMENTS_AIR_TEMPERATURE];
+              uint16_t temperature = registers[WavinController::EL_AIR_TEMP];
               uint16_t dewPoint    = registers[WavinController::EL_DEW_POINT];
               uint16_t humidity    = registers[WavinController::EL_HUMIDITY];
               uint16_t rssiRaw     = registers[WavinController::EL_RSSI];
-              uint16_t battery     = registers[WavinController::ELEMENTS_BATTERY_STATUS]; // In 10% steps
+              uint16_t battery     = registers[WavinController::EL_BATTERY]; // In 10% steps
+              uint16_t status      = registers[WavinController::EL_STATUS];
 
               // Temperature
               String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_TEMPERATURE);
@@ -965,6 +975,51 @@ void loop()
                                   rssiRaw,
                                   &(lastSentValues[channel].rssiRaw));
               }
+
+              // Decode bits (see Modbus spec 1.3.10)
+              bool alive     = status & WavinController::ELEMENT_STATUS_ALIVE;
+              bool lost      = status & WavinController::ELEMENT_STATUS_LOST;
+              bool lowBatt   = status & WavinController::ELEMENT_STATUS_LOW_BATT;
+              bool heatCall  = status & WavinController::ELEMENT_STATUS_TP_ACT;
+
+              // -------- heat_demand --------
+              {
+                String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/heat_demand");
+
+                publishIfNewValue(
+                    topic,
+                    heatCall ? "True" : "False",
+                    heatCall ? 1 : 0,
+                    &(lastSentValues[channel].heatDemand)
+                );
+              }
+
+              // -------- low_battery --------
+              {
+                String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/low_battery");
+
+                publishIfNewValue(
+                    topic,
+                    lowBatt ? "True" : "False",
+                    lowBatt ? 1 : 0,
+                    &(lastSentValues[channel].lowBattery)
+                );
+              }
+
+              // -------- availability (REAL, replaces hardcoded "online") --------
+              {
+                bool available = (alive && !lost);
+
+                String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/availability");
+
+                publishIfNewValue(
+                    topic,
+                    available ? "True" : "False",
+                    available ? 1 : 0,
+                    &(lastSentValues[channel].availability)
+                );
+              }
+
             }
           }
         }

@@ -24,6 +24,7 @@ const String   MQTT_CLIENT = "Wavin-AHC-9000-mqtt";       // mqtt client_id pref
 
 String mqttDeviceNameWithMac;
 String mqttClientWithMac;
+String deviceSwVersion = "1.0.0";
 
 // Operating mode is controlled by the MQTT_SUFFIX_MODE_ topic.
 // When mode is set to MQTT_VALUE_MODE_MANUAL, temperature is set to the value of MQTT_SUFFIX_SETPOINT_
@@ -58,6 +59,16 @@ struct lastKnownValue_t {
   uint16_t alarmLow;
 
 } lastSentValues[WavinController::NUMBER_OF_CHANNELS];
+
+struct lastSentSystem_t {
+  uint16_t pumpRunning;
+  uint16_t pumpMode;
+  uint16_t inletTemp;
+  uint16_t actuatorInterval;
+  uint16_t actuatorDuration;
+};
+
+lastSentSystem_t lastSentSystemValues;
 
 const uint16_t LAST_VALUE_UNKNOWN = 0xFFFF;
 
@@ -165,6 +176,15 @@ void resetLastSentValues()
   }
 }
 
+void resetLastSentSystemValues()
+{
+  lastSentSystemValues.pumpRunning = LAST_VALUE_UNKNOWN;
+  lastSentSystemValues.pumpMode = LAST_VALUE_UNKNOWN;
+  lastSentSystemValues.inletTemp = LAST_VALUE_UNKNOWN;
+  lastSentSystemValues.actuatorInterval = LAST_VALUE_UNKNOWN;
+  lastSentSystemValues.actuatorDuration = LAST_VALUE_UNKNOWN;
+}
+
 
 void publishIfNewValue(String topic, String payload, uint16_t newValue, uint16_t *lastSentValue)
 {
@@ -184,62 +204,398 @@ void publishIfNewValue(String topic, String payload, uint16_t newValue, uint16_t
 
 // Publish discovery messages for HomeAssistant
 // See https://www.home-assistant.io/docs/mqtt/discovery/
-void publishConfiguration(uint8_t channel, String deviceSwVersion)
+void publishConfiguration(uint8_t channel)
 {
-  String climateTopic = String("homeassistant/climate/" + mqttDeviceNameWithMac + "/" + channel + "/config");
-  String climateMessage = String(
-    "{\"name\": \"" +mqttDeviceNameWithMac + "_" + channel +  "_climate\", "
-    "\"unique_id\": \"" + mqttDeviceNameWithMac + "_" + channel +  "_climate_id\", "
-    "\"action_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_OUTPUT + "\", " 
-    "\"current_temperature_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_CURRENT + "\", " 
-    "\"temperature_command_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_SETPOINT_SET + "\", " 
-    "\"temperature_state_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_SETPOINT_GET + "\", " 
-    "\"mode_command_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_MODE_SET + "\", " 
-    "\"mode_state_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_MODE_GET + "\", " 
-    "\"modes\": [\"" + MQTT_VALUE_MODE_MANUAL + "\", \"" + MQTT_VALUE_MODE_STANDBY + "\"], " 
-    "\"availability_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE +"\", "
-    "\"payload_available\": \"True\", "
-    "\"payload_not_available\": \"False\", "
-    "\"min_temp\": \"" + String(MIN_TEMP, 1) + "\", "
-    "\"max_temp\": \"" + String(MAX_TEMP, 1) + "\", "
-    "\"temp_step\": \"" + String(TEMP_STEP, 1) + "\", "
-    "\"device\": {"
-      "\"manufacturer\": \"Wavin\", "
-      "\"model\": \"AHC 9000\", "
-      "\"sw_version\": \"" + deviceSwVersion + "\", "
-      "\"name\": \"" + mqttDeviceNameWithMac + "\", "
-      "\"identifiers\": [\"" + mqttDeviceNameWithMac + "\"]"
-    "},"
-    "\"entity_category\": \"config\", "
-    "\"icon\": \"mdi:home-thermometer\", "
-    "\"qos\": \"0\"}"
-  );
-  
-  String batteryTopic = String("homeassistant/sensor/" + mqttDeviceNameWithMac + "/" + channel + "/config");
-  String batteryMessage = String(
-    "{\"name\": \"" +mqttDeviceNameWithMac + "_" + channel +  "_battery\", "
-    "\"unique_id\": \"" + mqttDeviceNameWithMac + "_" + channel +  "_battery_id\", "
-    "\"state_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/battery\", " 
-    "\"availability_topic\": \"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE +"\", "
-    "\"payload_available\": \"True\", "
-    "\"payload_not_available\": \"False\", "
-    "\"device_class\": \"battery\", "
-    "\"unit_of_measurement\": \"%\", "
-    "\"device\": {"
-      "\"manufacturer\": \"Wavin\", "
-      "\"model\": \"AHC 9000\", "
-      "\"sw_version\": \"" + deviceSwVersion + "\", "
-      "\"name\": \"" + mqttDeviceNameWithMac + "\", "
-      "\"identifiers\": [\"" + mqttDeviceNameWithMac + "\"]"
-    "},"
-    "\"entity_category\": \"diagnostic\", "
-    "\"qos\": \"0\"}"
+  String channelStr = String(channel);
+  String baseStateTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channelStr);
+  String availabilityTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE);
+
+  String deviceJson = String(
+    "{"
+      "\"manufacturer\":\"Wavin\","
+      "\"model\":\"AHC 9000\","
+      "\"sw_version\":\"" + deviceSwVersion + "\","
+      "\"name\":\"" + mqttDeviceNameWithMac + "\","
+      "\"identifiers\":[\"" + mqttDeviceNameWithMac + "\"]"
+    "}"
   );
 
-  mqttClient.publish(climateTopic.c_str(), climateMessage.c_str(), true);  
+  // =========================
+  // Climate entity
+  // =========================
+  String climateTopic = String(
+    "homeassistant/climate/" + mqttDeviceNameWithMac + "_" + channelStr + "_climate/config"
+  );
+
+  String climateMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_climate\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_climate_id\","
+      "\"action_topic\":\"" + baseStateTopic + MQTT_SUFFIX_OUTPUT + "\","
+      "\"current_temperature_topic\":\"" + baseStateTopic + MQTT_SUFFIX_CURRENT + "\","
+      "\"temperature_command_topic\":\"" + baseStateTopic + MQTT_SUFFIX_SETPOINT_SET + "\","
+      "\"temperature_state_topic\":\"" + baseStateTopic + MQTT_SUFFIX_SETPOINT_GET + "\","
+      "\"mode_command_topic\":\"" + baseStateTopic + MQTT_SUFFIX_MODE_SET + "\","
+      "\"mode_state_topic\":\"" + baseStateTopic + MQTT_SUFFIX_MODE_GET + "\","
+      "\"modes\":[\"" + String(MQTT_VALUE_MODE_MANUAL) + "\",\"" + String(MQTT_VALUE_MODE_STANDBY) + "\"],"
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"min_temp\":" + String(MIN_TEMP, 1) + ","
+      "\"max_temp\":" + String(MAX_TEMP, 1) + ","
+      "\"temp_step\":" + String(TEMP_STEP, 1) + ","
+      "\"device\":" + deviceJson + ","
+      "\"icon\":\"mdi:home-thermometer\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // Battery sensor
+  // =========================
+  String batteryTopic = String(
+    "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_battery/config"
+  );
+
+  String batteryMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_battery\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_battery_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/battery\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"device_class\":\"battery\","
+      "\"unit_of_measurement\":\"%\","
+      "\"state_class\":\"measurement\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // Humidity sensor
+  // =========================
+  String humidityTopic = String(
+    "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_humidity/config"
+  );
+
+  String humidityMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_humidity\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_humidity_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/humidity\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"unit_of_measurement\":\"%\","
+      "\"device_class\":\"humidity\","
+      "\"state_class\":\"measurement\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // Dew point sensor
+  // =========================
+  String dewPointTopic = String(
+    "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_dew_point/config"
+  );
+
+  String dewPointMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_dew_point\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_dew_point_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/dew_point\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"unit_of_measurement\":\"°C\","
+      "\"device_class\":\"temperature\","
+      "\"state_class\":\"measurement\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // RSSI sensor
+  // =========================
+  String rssiTopic = String(
+    "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_rssi/config"
+  );
+
+  String rssiMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_rssi\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_rssi_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/rssi\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"unit_of_measurement\":\"dBm\","
+      "\"device_class\":\"signal_strength\","
+      "\"state_class\":\"measurement\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // Channel current sensor
+  // =========================
+  String currentTopic = String(
+    "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_current/config"
+  );
+
+  String currentMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_current\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_current_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/current\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"unit_of_measurement\":\"mA\","
+      "\"device_class\":\"current\","
+      "\"state_class\":\"measurement\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // Alarm high binary sensor
+  // =========================
+  String alarmHighTopic = String(
+    "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_alarm_high/config"
+  );
+
+  String alarmHighMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_alarm_high\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_alarm_high_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/alarm_high\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"payload_on\":\"True\","
+      "\"payload_off\":\"False\","
+      "\"device_class\":\"problem\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // Alarm low binary sensor
+  // =========================
+  String alarmLowTopic = String(
+    "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_alarm_low/config"
+  );
+
+  String alarmLowMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_alarm_low\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_alarm_low_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/alarm_low\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"payload_on\":\"True\","
+      "\"payload_off\":\"False\","
+      "\"device_class\":\"problem\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // Publish discovery
+  mqttClient.publish(climateTopic.c_str(), climateMessage.c_str(), true);
   mqttClient.publish(batteryTopic.c_str(), batteryMessage.c_str(), true);
-  
+  mqttClient.publish(humidityTopic.c_str(), humidityMessage.c_str(), true);
+  mqttClient.publish(dewPointTopic.c_str(), dewPointMessage.c_str(), true);
+  mqttClient.publish(rssiTopic.c_str(), rssiMessage.c_str(), true);
+  mqttClient.publish(currentTopic.c_str(), currentMessage.c_str(), true);
+  mqttClient.publish(alarmHighTopic.c_str(), alarmHighMessage.c_str(), true);
+  mqttClient.publish(alarmLowTopic.c_str(), alarmLowMessage.c_str(), true);
+
   configurationPublished[channel] = true;
+}
+
+void publishSystemConfiguration()
+{
+  String availabilityTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE);
+  String baseStateTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system");
+
+  String deviceJson = String(
+    "{"
+      "\"manufacturer\":\"Wavin\","
+      "\"model\":\"AHC 9000\","
+      "\"sw_version\":\"" + deviceSwVersion + "\","
+      "\"name\":\"" + mqttDeviceNameWithMac + "\","
+      "\"identifiers\":[\"" + mqttDeviceNameWithMac + "\"]"
+    "}"
+  );
+
+  // =========================
+  // Pump running (binary sensor)
+  // =========================
+  String pumpRunningTopic = String(
+    "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_pump_running/config"
+  );
+
+  String pumpRunningMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_pump_running\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_pump_running_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/pump_running\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"payload_on\":\"True\","
+      "\"payload_off\":\"False\","
+      "\"device_class\":\"running\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // Pump mode (sensor)
+  // =========================
+  String pumpModeTopic = String(
+    "homeassistant/sensor/" + mqttDeviceNameWithMac + "_pump_mode/config"
+  );
+
+  String pumpModeMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_pump_mode\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_pump_mode_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/pump_mode\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"icon\":\"mdi:pump\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // Inlet temperature (sensor)
+  // =========================
+  String inletTempTopic = String(
+    "homeassistant/sensor/" + mqttDeviceNameWithMac + "_inlet_temperature/config"
+  );
+
+  String inletTempMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_inlet_temperature\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_inlet_temperature_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/inlet_temperature\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"unit_of_measurement\":\"°C\","
+      "\"device_class\":\"temperature\","
+      "\"state_class\":\"measurement\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // Actuator motion interval (sensor)
+  // =========================
+  String actuatorIntervalTopic = String(
+    "homeassistant/sensor/" + mqttDeviceNameWithMac + "_actuator_motion_interval/config"
+  );
+
+  String actuatorIntervalMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_actuator_motion_interval\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_actuator_motion_interval_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/actuator_motion_interval\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"unit_of_measurement\":\"s\","
+      "\"state_class\":\"measurement\","
+      "\"icon\":\"mdi:timer-cog\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // =========================
+  // Actuator motion duration (sensor)
+  // =========================
+  String actuatorDurationTopic = String(
+    "homeassistant/sensor/" + mqttDeviceNameWithMac + "_actuator_motion_duration/config"
+  );
+
+  String actuatorDurationMessage = String(
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_actuator_motion_duration\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_actuator_motion_duration_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/actuator_motion_duration\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"unit_of_measurement\":\"s\","
+      "\"state_class\":\"measurement\","
+      "\"icon\":\"mdi:timer-play-outline\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}"
+  );
+
+  // Publish discovery
+  mqttClient.publish(pumpRunningTopic.c_str(), pumpRunningMessage.c_str(), true);
+  mqttClient.publish(pumpModeTopic.c_str(), pumpModeMessage.c_str(), true);
+  mqttClient.publish(inletTempTopic.c_str(), inletTempMessage.c_str(), true);
+  mqttClient.publish(actuatorIntervalTopic.c_str(), actuatorIntervalMessage.c_str(), true);
+  mqttClient.publish(actuatorDurationTopic.c_str(), actuatorDurationMessage.c_str(), true);
+}
+
+String buildDeviceVersionString()
+{
+    String hwVersion = "unknown";
+    String swVersion = "unknown";
+    uint16_t reg[1];
+
+    if (wavinController.readRegisters(WavinController::CATEGORY_INFO, 0,
+                                      WavinController::INFO_HW_VERSION, 1, reg))
+    {
+        hwVersion = "MC110" + String(reg[0] & WavinController::INFO_HW_VERSION_MASK);
+    }
+
+    if (wavinController.readRegisters(WavinController::CATEGORY_INFO, 0,
+                                      WavinController::INFO_SW_VERSION, 1, reg))
+    {
+        swVersion = "MC610" + String((reg[0] >> 4) & WavinController::INFO_SW_VERSION_MASK);
+
+        uint8_t betaVersion = reg[0] & WavinController::INFO_SW_BETA_VERSION_MASK;
+        if (betaVersion) {
+            swVersion += "b" + String(betaVersion);
+        }
+    }
+
+    return hwVersion + " / " + swVersion;
 }
 
 
@@ -286,6 +642,10 @@ void loop()
 
           // Forces resending of all parameters to server
           resetLastSentValues();
+
+          deviceSwVersion = buildDeviceVersionString();
+
+          publishSystemConfiguration();
       }
       else
       {
@@ -304,56 +664,93 @@ void loop()
       lastUpdateTime = millis();
 
       // =========================
-      // Global/system-wide values
+      // SYSTEM VALUES (cached)
       // =========================
 
+      // -------- Pump state --------
+      uint8_t tevent;
+      if (wavinController.getPumpState(tevent))
       {
-        uint8_t tevent;
-        if (wavinController.getPumpState(tevent))
-        {
-          // Relay timer event:
-          // 0x07 = OUTPUT_ON
-          // 0x0A = STOP_DELAY_TIMER
-          // 0x0D = PERIODIC_CYCLE_TIMER
-          bool running = (
+        bool running = (
             tevent == WavinController::RELAY_EVENT_OUTPUT_ON ||
             tevent == WavinController::RELAY_EVENT_STOP_DELAY ||
             tevent == WavinController::RELAY_EVENT_PERIODIC_CYCLE
         );
 
-
-          String pumpMode = "idle";
-          if (tevent == WavinController::RELAY_EVENT_OUTPUT_ON) pumpMode = "heating";
-          else if (tevent == WavinController::RELAY_EVENT_STOP_DELAY) pumpMode = "stop_delay";
-          else if (tevent == WavinController::RELAY_EVENT_PERIODIC_CYCLE) pumpMode = "exercise";
-          else if (tevent == WavinController::RELAY_EVENT_IDLE) pumpMode = "idle";
-
+        // pump_running (binary)
+        {
           String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/pump_running");
-          mqttClient.publish(topic.c_str(), running ? "True" : "False", true);
 
-          topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/pump_mode");
-          mqttClient.publish(topic.c_str(), pumpMode.c_str(), true);
+          publishIfNewValue(
+              topic,
+              running ? "True" : "False",
+              running ? 1 : 0,
+              &(lastSentSystemValues.pumpRunning)
+          );
         }
 
-        float inletTemp;
-        if (wavinController.getInletTemperature(inletTemp))
+        // pump_mode (string, cache by tevent)
         {
+          String mode = "idle";
+          if (tevent == WavinController::RELAY_EVENT_OUTPUT_ON) mode = "heating";
+          else if (tevent == WavinController::RELAY_EVENT_STOP_DELAY) mode = "stop_delay";
+          else if (tevent == WavinController::RELAY_EVENT_PERIODIC_CYCLE) mode = "exercise";
+
+          String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/pump_mode");
+
+          publishIfNewValue(
+              topic,
+              mode,
+              tevent,   // ✅ cache raw event
+              &(lastSentSystemValues.pumpMode)
+          );
+        }
+      }
+
+      // -------- Inlet temperature --------
+      float inletTemp;
+      if (wavinController.getInletTemperature(inletTemp))
+      {
+          uint16_t inletTempRaw = (uint16_t)(inletTemp * 10.0f);
+
           String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/inlet_temperature");
           String payload = String(inletTemp, 1);
-          mqttClient.publish(topic.c_str(), payload.c_str(), true);
-        }
 
-        uint16_t interval, duration;
-        if (wavinController.getActuatorMotion(interval, duration))
-        {
-          String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/actuator_motion_interval");
-          String payload = String(interval);
-          mqttClient.publish(topic.c_str(), payload.c_str(), true);
+          publishIfNewValue(
+              topic,
+              payload,
+              inletTempRaw,
+              &(lastSentSystemValues.inletTemp)
+          );
+      }
 
-          topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/actuator_motion_duration");
-          payload = String(duration);
-          mqttClient.publish(topic.c_str(), payload.c_str(), true);
-        }
+      // -------- Actuator motion --------
+      uint16_t interval, duration;
+      if (wavinController.getActuatorMotion(interval, duration))
+      {
+          // interval
+          {
+              String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/actuator_motion_interval");
+
+              publishIfNewValue(
+                  topic,
+                  String(interval),
+                  interval,
+                  &(lastSentSystemValues.actuatorInterval)
+              );
+          }
+
+          // duration
+          {
+              String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system/actuator_motion_duration");
+
+              publishIfNewValue(
+                  topic,
+                  String(duration),
+                  duration,
+                  &(lastSentSystemValues.actuatorDuration)
+              );
+          }
       }
 
       uint16_t registers[11];
@@ -375,26 +772,10 @@ void loop()
 
           if(!configurationPublished[channel])
           {
-            String hwVersion = "unknown";
-            String swVersion = "unknown";
-
-            if (wavinController.readRegisters(WavinController::CATEGORY_INFO, 0, WavinController::INFO_HW_VERSION, 1, registers))
-            {
-              hwVersion = "MC110" + String(registers[0] & WavinController::INFO_HW_VERSION_MASK);
-            }
-
-            if (wavinController.readRegisters(WavinController::CATEGORY_INFO, channel, WavinController::INFO_SW_VERSION, 1, registers))
-            {
-              swVersion = "MC610" + String((registers[0] >> 4) & WavinController::INFO_SW_VERSION_MASK);
-              uint8_t betaVersion = registers[0] & WavinController::INFO_SW_BETA_VERSION_MASK;
-              if (betaVersion) {
-                swVersion += "b" + String(betaVersion);
-              }
-            }
-
             uint16_t standbyTemperature = STANDBY_TEMPERATURE_DEG * 10;
             wavinController.writeRegister(WavinController::CATEGORY_PACKED_DATA, channel, WavinController::PACKED_DATA_STANDBY_TEMPERATURE, standbyTemperature);
-            publishConfiguration(channel, hwVersion + " / " + swVersion);
+
+            publishConfiguration(channel);
           }
 
           // Read the current setpoint programmed for channel

@@ -88,6 +88,12 @@ class WavinController
     static const uint8_t EL_BATTERY           = 0x0A;
     static const uint8_t EL_SYNC_GROUP        = 0x0B;
     static const uint8_t EL_LIVE_TIMER        = 0x0C;
+	
+    static const uint8_t  INFO_HW_VERSION = 0x02;
+    static const uint8_t  INFO_HW_VERSION_MASK = 0x7F;
+    static const uint8_t  INFO_SW_VERSION = 0x03;
+    static const uint8_t  INFO_SW_VERSION_MASK = 0xFF;
+    static const uint8_t  INFO_SW_BETA_VERSION_MASK = 0x0F;
     
   private:
     uint8_t txEnablePin;

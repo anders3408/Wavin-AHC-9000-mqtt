@@ -447,6 +447,59 @@ void publishConfiguration(uint8_t channel)
       "\"qos\":0"
     "}";
 
+  String heatDemandTopic =
+    "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_" + channel + "_heat_demand/config";
+
+  String heatDemandMessage =
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channel + "_heat_demand\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channel + "_heat_demand_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/heat_demand\","
+      "\"payload_on\":\"True\","
+      "\"payload_off\":\"False\","
+      "\"device_class\":\"heat\","
+      "\"availability_topic\":\"" + baseStateTopic + "/availability\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"device\":" + deviceJson +
+    "}";
+
+  String lowBatteryTopic =
+    "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_" + channel + "_low_battery/config";
+
+  String lowBatteryMessage =
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channel + "_low_battery\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channel + "_low_battery_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/low_battery\","
+      "\"payload_on\":\"True\","
+      "\"payload_off\":\"False\","
+      "\"device_class\":\"battery\","
+      "\"availability_topic\":\"" + baseStateTopic + "/availability\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"device\":" + deviceJson +
+    "}";
+
+  String availabilityTopicDisc =
+    "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_availability/config";
+
+  String availabilityMessageDisc =
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_availability\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_availability_id\","
+      "\"state_topic\":\"" + baseStateTopic + "/availability\","
+      "\"availability_topic\":\"" + baseStateTopic + "/availability\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"payload_on\":\"True\","
+      "\"payload_off\":\"False\","
+      "\"device_class\":\"connectivity\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}";
+
   // Publish discovery
   mqttClient.publish(climateTopic.c_str(), climateMessage.c_str(), true);
   mqttClient.publish(batteryTopic.c_str(), batteryMessage.c_str(), true);
@@ -457,6 +510,9 @@ void publishConfiguration(uint8_t channel)
   mqttClient.publish(alarmHighTopic.c_str(), alarmHighMessage.c_str(), true);
   mqttClient.publish(alarmLowTopic.c_str(), alarmLowMessage.c_str(), true);
   mqttClient.publish(roomSensorTopic.c_str(), roomSensorMessage.c_str(), true);
+  mqttClient.publish(heatDemandTopic.c_str(), heatDemandMessage.c_str(), true);
+  mqttClient.publish(lowBatteryTopic.c_str(), lowBatteryMessage.c_str(), true);
+  mqttClient.publish(availabilityTopicDisc.c_str(), availabilityMessageDisc.c_str(), true);
 
   configurationPublished[channel] = true;
 }

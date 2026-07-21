@@ -221,7 +221,7 @@ void publishConfiguration(uint8_t channel)
 {
   String channelStr = String(channel);
   String baseStateTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channelStr);
-  String availabilityTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_AVAILABILITY);
+  String availabilityTopic = String(baseStateTopic + MQTT_AVAILABILITY);
 
   String deviceJson = String(
     "{"
@@ -432,13 +432,12 @@ void publishConfiguration(uint8_t channel)
   );
 
   String roomSensorTopic = "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor/config";
-
   String roomSensorMessage =
     "{"
       "\"name\":\"" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor\","
       "\"state_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/room_sensor\","
-      "\"availability_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_AVAILABILITY + "\","
+      "\"availability_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/availability\","
       "\"payload_available\":\"True\","
       "\"payload_not_available\":\"False\","
       "\"icon\":\"mdi:home-group\","
@@ -464,7 +463,7 @@ void publishConfiguration(uint8_t channel)
 
 void publishSystemConfiguration()
 {
-  String availabilityTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_AVAILABILITY);
+  String availabilityTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE);
   String baseStateTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/system");
 
   String deviceJson = String(
@@ -673,6 +672,7 @@ void loop()
 
           // Forces resending of all parameters to server
           resetLastSentValues();
+          resetLastSentSystemValues();
 
           deviceSwVersion = buildDeviceVersionString();
 

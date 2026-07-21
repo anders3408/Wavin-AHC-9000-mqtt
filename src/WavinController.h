@@ -95,8 +95,8 @@ class WavinController
     static const uint8_t  INFO_SW_VERSION_MASK = 0xFF;
     static const uint8_t  INFO_SW_BETA_VERSION_MASK = 0x0F;
 
-    static const uint8_t  CH_PRI_ALARM_HIGH = 1 << 9;
-    static const uint8_t  CH_PRI_ALARM_LOW = 1 << 8;
+    static const uint16_t CH_PRI_ALARM_HIGH = 1 << 9;
+    static const uint16_t CH_PRI_ALARM_LOW = 1 << 8;
     
   private:
     uint8_t txEnablePin;

@@ -9,7 +9,7 @@
 const String   MQTT_PREFIX              = "heat/";       // include tailing '/' in prefix
 const String   MQTT_DEVICE_NAME         = "floor";       // only alfanumeric and no '/'
 const String   MQTT_ONLINE              = "/online";      
-const String   MQTT_SUFFIX_CURRENT      = "/current";    // include heading '/' in all suffixes
+const String   MQTT_SUFFIX_TEMPERATURE  = "/temperature";    // include heading '/' in all suffixes
 const String   MQTT_SUFFIX_SETPOINT_GET = "/target";
 const String   MQTT_SUFFIX_SETPOINT_SET = "/target_set";
 const String   MQTT_SUFFIX_MODE_GET     = "/mode";
@@ -67,6 +67,8 @@ struct lastSentSystem_t {
   uint16_t actuatorInterval;
   uint16_t actuatorDuration;
 };
+
+
 
 lastSentSystem_t lastSentSystemValues;
 
@@ -232,7 +234,7 @@ void publishConfiguration(uint8_t channel)
       "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_climate\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_climate_id\","
       "\"action_topic\":\"" + baseStateTopic + MQTT_SUFFIX_OUTPUT + "\","
-      "\"current_temperature_topic\":\"" + baseStateTopic + MQTT_SUFFIX_CURRENT + "\","
+      "\"current_temperature_topic\":\"" + baseStateTopic + MQTT_SUFFIX_TEMPERATURE + "\","
       "\"temperature_command_topic\":\"" + baseStateTopic + MQTT_SUFFIX_SETPOINT_SET + "\","
       "\"temperature_state_topic\":\"" + baseStateTopic + MQTT_SUFFIX_SETPOINT_GET + "\","
       "\"mode_command_topic\":\"" + baseStateTopic + MQTT_SUFFIX_MODE_SET + "\","
@@ -357,7 +359,7 @@ void publishConfiguration(uint8_t channel)
     "{"
       "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_current\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_current_id\","
-      "\"state_topic\":\"" + baseStateTopic + "/current\","
+      "\"state_topic\":\"" + baseStateTopic + "/channel_current\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
       "\"payload_available\":\"True\","
       "\"payload_not_available\":\"False\","
@@ -778,7 +780,7 @@ void loop()
             publishConfiguration(channel);
           }
 
-          // Read the current setpoint programmed for channel
+          // Read the f setpoint programmed for channel
           if (wavinController.readRegisters(WavinController::CATEGORY_PACKED_DATA, channel, WavinController::PACKED_DATA_MANUAL_TEMPERATURE, 1, registers))
           {
             uint16_t setpoint = registers[0];
@@ -847,7 +849,7 @@ void loop()
           {
             uint16_t currentRaw = registers[0];
 
-            String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/current");
+            String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/channel_current");
             String payload = String(currentRaw * 0.54f, 2);
 
             publishIfNewValue(topic,
@@ -864,13 +866,13 @@ void loop()
             if (wavinController.readRegisters(WavinController::CATEGORY_ELEMENTS, primaryElement-1, 0, 11, registers))
             {
               uint16_t temperature = registers[WavinController::ELEMENTS_AIR_TEMPERATURE];
-              uint16_t dewPoint    = registers[0x06];
-              uint16_t humidity    = registers[0x07];
-              uint16_t rssiRaw     = registers[0x09];
+              uint16_t dewPoint    = registers[WavinController::EL_DEW_POINT];
+              uint16_t humidity    = registers[WavinController::EL_HUMIDITY];
+              uint16_t rssiRaw     = registers[WavinController::EL_RSSI];
               uint16_t battery     = registers[WavinController::ELEMENTS_BATTERY_STATUS]; // In 10% steps
 
               // Temperature
-              String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_CURRENT);
+              String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + MQTT_SUFFIX_TEMPERATURE);
               String payload = temperatureAsFloatString(temperature);
               publishIfNewValue(topic, payload, temperature, &(lastSentValues[channel].temperature));
 

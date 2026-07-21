@@ -433,7 +433,7 @@ void publishConfiguration(uint8_t channel)
       "\"payload_available\":\"True\","
       "\"payload_not_available\":\"False\","
       "\"icon\":\"mdi:home-group\","
-      "\"device_class\":\"problem\","
+      "\"device_class\": null,"
       "\"device\":" + deviceJson + ","
       "\"entity_category\":\"diagnostic\","
       "\"qos\":0"

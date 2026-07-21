@@ -58,6 +58,8 @@ struct lastKnownValue_t {
   uint16_t alarmHigh;
   uint16_t alarmLow;
 
+  uint16_t roomSensor;
+
 } lastSentValues[WavinController::NUMBER_OF_CHANNELS];
 
 struct lastSentSystem_t {
@@ -67,8 +69,6 @@ struct lastSentSystem_t {
   uint16_t actuatorInterval;
   uint16_t actuatorDuration;
 };
-
-
 
 lastSentSystem_t lastSentSystemValues;
 
@@ -173,6 +173,8 @@ void resetLastSentValues()
     lastSentValues[i].currentRaw = LAST_VALUE_UNKNOWN;
     lastSentValues[i].alarmHigh  = LAST_VALUE_UNKNOWN;
     lastSentValues[i].alarmLow   = LAST_VALUE_UNKNOWN;
+
+    lastSentValues[i].roomSensor = LAST_VALUE_UNKNOWN;
 
     configurationPublished[i] = false;
   }
@@ -420,6 +422,23 @@ void publishConfiguration(uint8_t channel)
     "}"
   );
 
+  String roomSensorTopic = "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor/config";
+
+  String roomSensorMessage =
+    "{"
+      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor\","
+      "\"state_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/room_sensor\","
+      "\"availability_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE + "\","
+      "\"payload_available\":\"True\","
+      "\"payload_not_available\":\"False\","
+      "\"icon\":\"mdi:home-group\","
+      "\"device_class\":\"problem\","
+      "\"device\":" + deviceJson + ","
+      "\"entity_category\":\"diagnostic\","
+      "\"qos\":0"
+    "}";
+
   // Publish discovery
   mqttClient.publish(climateTopic.c_str(), climateMessage.c_str(), true);
   mqttClient.publish(batteryTopic.c_str(), batteryMessage.c_str(), true);
@@ -429,6 +448,7 @@ void publishConfiguration(uint8_t channel)
   mqttClient.publish(currentTopic.c_str(), currentMessage.c_str(), true);
   mqttClient.publish(alarmHighTopic.c_str(), alarmHighMessage.c_str(), true);
   mqttClient.publish(alarmLowTopic.c_str(), alarmLowMessage.c_str(), true);
+  mqttClient.publish(roomSensorTopic.c_str(), roomSensorMessage.c_str(), true);
 
   configurationPublished[channel] = true;
 }
@@ -763,8 +783,35 @@ void loop()
         {
           uint16_t primaryElement = registers[0] & WavinController::CHANNELS_PRIMARY_ELEMENT_ELEMENT_MASK;
           bool allThermostatsLost = registers[0] & WavinController::CHANNELS_PRIMARY_ELEMENT_ALL_TP_LOST_MASK;
-          bool alarmHigh = registers[0] & (1 << 9);
-          bool alarmLow  = registers[0] & (1 << 8);
+          bool alarmHigh = registers[0] & (WavinController::CH_PRI_ALARM_HIGH);
+          bool alarmLow  = registers[0] & (WavinController::CH_PRI_ALARM_LOW);
+
+          // ==========================
+          // Room sensor mapping (NEW)
+          // ==========================
+          {
+            // Convert to 0-based index (0 means "not used")
+            uint16_t elementIndex = (primaryElement > 0) ? (primaryElement - 1) : 0xFFFF;
+
+            String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/room_sensor");
+
+            String payload;
+            if (primaryElement == 0)
+            {
+              payload = "none";
+            }
+            else
+            {
+              payload = String(elementIndex);
+            }
+
+            publishIfNewValue(
+                topic,
+                payload,
+                elementIndex,
+                &(lastSentValues[channel].roomSensor)
+            );
+          }
 
           if(primaryElement==0)
           {

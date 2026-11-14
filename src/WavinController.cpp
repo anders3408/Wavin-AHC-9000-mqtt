@@ -42,7 +42,10 @@ unsigned int WavinController::calculateCRC(uint8_t *frame, uint8_t bufferSize)
 }
 
 
-bool WavinController::recieve(uint16_t *reply, uint8_t cmdtype)
+bool WavinController::receive(
+  uint16_t *reply,
+  uint8_t cmdtype,
+  uint8_t expectedRegisterCount)
 {
   uint8_t buffer[RECIEVE_BUFFER_SIZE];
   uint8_t n = 0;
@@ -50,29 +53,48 @@ bool WavinController::recieve(uint16_t *reply, uint8_t cmdtype)
 
   while (millis() - start_time < recieveTimeout_ms)
   {
-    while (Serial.available() && n<RECIEVE_BUFFER_SIZE)
+    while (Serial.available() && n < RECIEVE_BUFFER_SIZE)
     {
       buffer[n] = Serial.read();
       n++;
 
       if (n > 5 &&
-        buffer[0] == MODBUS_DEVICE &&
-        buffer[1] == cmdtype &&
-        buffer[2] + 5 == n)
+          buffer[0] == MODBUS_DEVICE &&
+          buffer[1] == cmdtype &&
+          buffer[2] + 5 == n)
       {
-        // Complete package
+        // Complete package received.
         uint16_t crc = calculateCRC(buffer, n);
-        if (crc != 0) return false;
 
-        // CRC ok, copy to reply buffer
-        for (int j = 0; j < buffer[2] / 2; j++)
+        if (crc != 0)
         {
-          reply[j] = (buffer[3 + j * 2] << 8) + buffer[4 + j * 2];
+          return false;
         }
+
+        // Each register contains 2 bytes.
+        uint8_t expectedDataBytes = expectedRegisterCount * 2;
+
+        // Make sure the controller returned exactly the number
+        // of registers that the caller has allocated space for.
+        if (buffer[2] != expectedDataBytes)
+        {
+          return false;
+        }
+
+        // CRC and response size are valid.
+        // It is now safe to copy the registers to reply.
+        for (uint8_t j = 0; j < expectedRegisterCount; j++)
+        {
+          reply[j] =
+            (static_cast<uint16_t>(buffer[3 + j * 2]) << 8) |
+            static_cast<uint16_t>(buffer[4 + j * 2]);
+        }
+
         return true;
       }
     }
   }
+
   return false;
 }
 
@@ -111,7 +133,7 @@ bool WavinController::readRegisters(uint8_t category, uint8_t page, uint8_t inde
 
   transmit(message, 8);
 
-  return recieve(reply, MODBUS_READ_REGISTER);
+  return receive(reply, MODBUS_READ_REGISTER, count);
 }
 
 
@@ -136,7 +158,7 @@ bool WavinController::writeRegister(uint8_t category, uint8_t page, uint8_t inde
   transmit(message, 10);
 
   uint16_t reply[1];
-  return recieve(reply, MODBUS_WRITE_REGISTER); // Recieve reply but ignore it. Asume it's ok
+  return receive(reply, MODBUS_WRITE_REGISTER, 1); // Receive reply but ignore it. Assume it's ok
 }
 
 bool WavinController::writeMaskedRegister(uint8_t category, uint8_t page, uint8_t index, uint16_t value, uint16_t mask)
@@ -162,7 +184,7 @@ bool WavinController::writeMaskedRegister(uint8_t category, uint8_t page, uint8_
   transmit(message, 12);
 
   uint16_t reply[1];
-  return recieve(reply, MODBUS_WRITE_MASKED_REGISTER); // Recieve reply but ignore it. Asume it's ok
+  return receive(reply, MODBUS_WRITE_MASKED_REGISTER, 1); // Receive reply but ignore it. Assume it's ok
 }
 
 bool WavinController::getPumpState(uint8_t& tevent)

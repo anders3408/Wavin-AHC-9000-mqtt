@@ -105,7 +105,11 @@ class WavinController
     uint8_t txEnablePin;
     uint16_t recieveTimeout_ms;
     void transmit(uint8_t *data, uint8_t lenght);
-    bool recieve(uint16_t *reply, uint8_t cmdtype);
+    bool receive(
+      uint16_t* reply,
+      uint8_t commandType,
+      uint8_t expectedRegisterCount
+    );
     unsigned int calculateCRC(unsigned char *frame, unsigned char bufferSize);
 
     const uint8_t MODBUS_DEVICE = 0x01;

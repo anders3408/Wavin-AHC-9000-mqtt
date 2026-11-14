@@ -494,7 +494,7 @@ void publishConfiguration(uint8_t channel)
       "\"payload_on\":\"True\","
       "\"payload_off\":\"False\","
       "\"device_class\":\"heat\","
-      "\"availability_topic\":\"" + baseStateTopic + "/availability\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
       "\"payload_available\":\"True\","
       "\"payload_not_available\":\"False\","
       "\"device\":" + deviceJson +
@@ -514,7 +514,7 @@ void publishConfiguration(uint8_t channel)
       "\"payload_on\":\"True\","
       "\"payload_off\":\"False\","
       "\"device_class\":\"battery\","
-      "\"availability_topic\":\"" + baseStateTopic + "/availability\","
+      "\"availability_topic\":\"" + availabilityTopic + "\","
       "\"payload_available\":\"True\","
       "\"payload_not_available\":\"False\","
       "\"device\":" + deviceJson +

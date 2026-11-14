@@ -220,6 +220,34 @@ void publishIfNewValue(String topic, String payload, uint16_t newValue, uint16_t
 void publishConfiguration(uint8_t channel)
 {
   String channelStr = String(channel);
+
+  // =========================
+  // Channel -> room mapping
+  // =========================
+  String roomName;
+
+  switch (channel)
+  {
+    case 0:
+      roomName = "Køkken";
+      break;
+    case 1:
+      roomName = "Stue";
+      break;
+    case 2:
+      roomName = "Gang";
+      break;
+    case 3:
+      roomName = "Kontor";
+      break;
+    case 4:
+      roomName = "WC";
+      break;
+    default:
+      roomName = "Kanal " + channelStr;
+      break;
+  }
+
   String baseStateTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channelStr);
   String availabilityTopic = String(baseStateTopic + MQTT_AVAILABILITY);
 
@@ -242,7 +270,7 @@ void publishConfiguration(uint8_t channel)
 
   String climateMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_climate\","
+      "\"name\":\"" + roomName + " gulvvarme\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_climate_id\","
       "\"action_topic\":\"" + baseStateTopic + MQTT_SUFFIX_OUTPUT + "\","
       "\"current_temperature_topic\":\"" + baseStateTopic + MQTT_SUFFIX_TEMPERATURE + "\","
@@ -272,7 +300,7 @@ void publishConfiguration(uint8_t channel)
 
   String batteryMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_battery\","
+      "\"name\":\"" + roomName + " batteriniveau\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_battery_id\","
       "\"state_topic\":\"" + baseStateTopic + "/battery\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -296,7 +324,7 @@ void publishConfiguration(uint8_t channel)
 
   String humidityMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_humidity\","
+      "\"name\":\"" + roomName + " luftfugtighed\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_humidity_id\","
       "\"state_topic\":\"" + baseStateTopic + "/humidity\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -320,7 +348,7 @@ void publishConfiguration(uint8_t channel)
 
   String dewPointMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_dew_point\","
+      "\"name\":\"" + roomName + " dugpunkt\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_dew_point_id\","
       "\"state_topic\":\"" + baseStateTopic + "/dew_point\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -344,7 +372,7 @@ void publishConfiguration(uint8_t channel)
 
   String rssiMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_rssi\","
+      "\"name\":\"" + roomName + " signalstyrke\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_rssi_id\","
       "\"state_topic\":\"" + baseStateTopic + "/rssi\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -368,7 +396,7 @@ void publishConfiguration(uint8_t channel)
 
   String currentMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_current\","
+      "\"name\":\"" + roomName + " strøm\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_current_id\","
       "\"state_topic\":\"" + baseStateTopic + "/channel_current\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -392,7 +420,7 @@ void publishConfiguration(uint8_t channel)
 
   String alarmHighMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_alarm_high\","
+      "\"name\":\"" + roomName + " alarm høj temperatur\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_alarm_high_id\","
       "\"state_topic\":\"" + baseStateTopic + "/alarm_high\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -416,7 +444,7 @@ void publishConfiguration(uint8_t channel)
 
   String alarmLowMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_alarm_low\","
+      "\"name\":\"" + roomName + " alarm lav temperatur\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_alarm_low_id\","
       "\"state_topic\":\"" + baseStateTopic + "/alarm_low\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -431,13 +459,18 @@ void publishConfiguration(uint8_t channel)
     "}"
   );
 
-  String roomSensorTopic = "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor/config";
+  // =========================
+  // Room sensor
+  // =========================
+  String roomSensorTopic =
+    "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_room_sensor/config";
+
   String roomSensorMessage =
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor\","
-      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channel + "_room_sensor\","
-      "\"state_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/room_sensor\","
-      "\"availability_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/availability\","
+      "\"name\":\"" + roomName + " rumføler\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_room_sensor\","
+      "\"state_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channelStr + "/room_sensor\","
+      "\"availability_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channelStr + "/availability\","
       "\"payload_available\":\"True\","
       "\"payload_not_available\":\"False\","
       "\"icon\":\"mdi:home-group\","
@@ -447,13 +480,16 @@ void publishConfiguration(uint8_t channel)
       "\"qos\":0"
     "}";
 
+  // =========================
+  // Heat demand
+  // =========================
   String heatDemandTopic =
-    "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_" + channel + "_heat_demand/config";
+    "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_heat_demand/config";
 
   String heatDemandMessage =
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channel + "_heat_demand\","
-      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channel + "_heat_demand_id\","
+      "\"name\":\"" + roomName + " varmebehov\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_heat_demand_id\","
       "\"state_topic\":\"" + baseStateTopic + "/heat_demand\","
       "\"payload_on\":\"True\","
       "\"payload_off\":\"False\","
@@ -464,13 +500,16 @@ void publishConfiguration(uint8_t channel)
       "\"device\":" + deviceJson +
     "}";
 
+  // =========================
+  // Low battery
+  // =========================
   String lowBatteryTopic =
-    "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_" + channel + "_low_battery/config";
+    "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_low_battery/config";
 
   String lowBatteryMessage =
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channel + "_low_battery\","
-      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channel + "_low_battery_id\","
+      "\"name\":\"" + roomName + " lavt batteri\","
+      "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_low_battery_id\","
       "\"state_topic\":\"" + baseStateTopic + "/low_battery\","
       "\"payload_on\":\"True\","
       "\"payload_off\":\"False\","
@@ -481,12 +520,15 @@ void publishConfiguration(uint8_t channel)
       "\"device\":" + deviceJson +
     "}";
 
+  // =========================
+  // Availability
+  // =========================
   String availabilityTopicDisc =
     "homeassistant/binary_sensor/" + mqttDeviceNameWithMac + "_" + channelStr + "_availability/config";
 
   String availabilityMessageDisc =
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_availability\","
+      "\"name\":\"" + roomName + " forbindelse\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_availability_id\","
       "\"state_topic\":\"" + baseStateTopic + "/availability\","
       "\"availability_topic\":\"" + baseStateTopic + "/availability\","
@@ -500,7 +542,9 @@ void publishConfiguration(uint8_t channel)
       "\"qos\":0"
     "}";
 
+  // =========================
   // Publish discovery
+  // =========================
   mqttClient.publish(climateTopic.c_str(), climateMessage.c_str(), true);
   mqttClient.publish(batteryTopic.c_str(), batteryMessage.c_str(), true);
   mqttClient.publish(humidityTopic.c_str(), humidityMessage.c_str(), true);
@@ -541,7 +585,7 @@ void publishSystemConfiguration()
 
   String pumpRunningMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_pump_running\","
+      "\"name\":\"Pumpe kører\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_pump_running_id\","
       "\"state_topic\":\"" + baseStateTopic + "/pump_running\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -565,7 +609,7 @@ void publishSystemConfiguration()
 
   String pumpModeMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_pump_mode\","
+      "\"name\":\"Pumpetilstand\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_pump_mode_id\","
       "\"state_topic\":\"" + baseStateTopic + "/pump_mode\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -587,7 +631,7 @@ void publishSystemConfiguration()
 
   String inletTempMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_inlet_temperature\","
+      "\"name\":\"Fremløbstemperatur\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_inlet_temperature_id\","
       "\"state_topic\":\"" + baseStateTopic + "/inlet_temperature\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -611,7 +655,7 @@ void publishSystemConfiguration()
 
   String actuatorIntervalMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_actuator_motion_interval\","
+      "\"name\":\"Aktuator bevægelsesinterval\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_actuator_motion_interval_id\","
       "\"state_topic\":\"" + baseStateTopic + "/actuator_motion_interval\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -635,7 +679,7 @@ void publishSystemConfiguration()
 
   String actuatorDurationMessage = String(
     "{"
-      "\"name\":\"" + mqttDeviceNameWithMac + "_actuator_motion_duration\","
+      "\"name\":\"Aktuator bevægelsestid\","
       "\"unique_id\":\"" + mqttDeviceNameWithMac + "_actuator_motion_duration_id\","
       "\"state_topic\":\"" + baseStateTopic + "/actuator_motion_duration\","
       "\"availability_topic\":\"" + availabilityTopic + "\","
@@ -650,7 +694,9 @@ void publishSystemConfiguration()
     "}"
   );
 
+  // =========================
   // Publish discovery
+  // =========================
   mqttClient.publish(pumpRunningTopic.c_str(), pumpRunningMessage.c_str(), true);
   mqttClient.publish(pumpModeTopic.c_str(), pumpModeMessage.c_str(), true);
   mqttClient.publish(inletTempTopic.c_str(), inletTempMessage.c_str(), true);

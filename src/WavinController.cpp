@@ -8,7 +8,7 @@ WavinController::WavinController(uint8_t pin, bool swapSerialPins, uint16_t time
   digitalWrite(pin, LOW);
   pinMode(pin, OUTPUT);
 
-  recieveTimeout_ms = timeout_ms;
+  recieveTimeoutMs = timeout_ms;
 
   Serial.begin(38400);
 
@@ -51,7 +51,7 @@ bool WavinController::receive(
   uint8_t n = 0;
   unsigned long start_time = millis();
 
-  while (millis() - start_time < recieveTimeout_ms)
+  while (millis() - start_time < recieveTimeoutMs)
   {
     while (Serial.available() && n < RECIEVE_BUFFER_SIZE)
     {
@@ -93,20 +93,23 @@ bool WavinController::receive(
         return true;
       }
     }
+    // Give ESP8266 Wi-Fi stack and watchdog time to run
+    // while waiting for the Wavin controller to respond.
+    yield();
   }
 
   return false;
 }
 
 
-void WavinController::transmit(uint8_t *data, uint8_t lenght)
+void WavinController::transmit(uint8_t *data, uint8_t length)
 {
   // Empty recieve buffer before sending
   while (Serial.read() != -1);
 
   digitalWrite(txEnablePin, HIGH);
 
-  Serial.write(data, lenght);
+  Serial.write(data, length);
 
   Serial.flush(); // Wait for data to be sent
   delayMicroseconds(250); // Wait for last char to be transmitted
@@ -265,7 +268,7 @@ bool WavinController::getElementData(
 
     return true;
 }
-// Get the current consumption of a channel in Amperes but is not inused in the current implementation. It is here for future use. Perhaps
+// Get the current consumption of a channel in milliamperes but is not inused in the current implementation. It is here for future use. Perhaps
 bool WavinController::getChannelCurrent(uint8_t ch, float& current)
 {
     uint16_t raw;

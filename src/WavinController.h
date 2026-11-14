@@ -103,7 +103,7 @@ class WavinController
 
   private:
     uint8_t txEnablePin;
-    uint16_t recieveTimeout_ms;
+    uint16_t recieveTimeoutMs;
     void transmit(uint8_t *data, uint8_t lenght);
     bool receive(
       uint16_t* reply,

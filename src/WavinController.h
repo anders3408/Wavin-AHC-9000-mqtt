@@ -21,7 +21,11 @@ class WavinController
         float& rssi
     );
 
-    bool getChannelCurrent(uint8_t ch, float& current);
+    bool getChannelCurrent(
+        uint8_t ch,
+        uint16_t& raw,
+        float& current
+    );
     bool getActuatorMotion(uint16_t& interval, uint16_t& duration);
     bool getChannelAlarms(uint8_t ch, bool& high, bool& low);
     

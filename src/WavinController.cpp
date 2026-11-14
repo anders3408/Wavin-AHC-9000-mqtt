@@ -269,15 +269,23 @@ bool WavinController::getElementData(
     return true;
 }
 // Get the current consumption of a channel in milliamperes but is not inused in the current implementation. It is here for future use. Perhaps
-bool WavinController::getChannelCurrent(uint8_t ch, float& current)
+bool WavinController::getChannelCurrent(
+    uint8_t ch,
+    uint16_t& raw,
+    float& current)
 {
-    uint16_t raw;
-
-    if (!readRegisters(CATEGORY_CHANNELS, ch, CHANNELS_CURRENT_CONSUMPTION, 1, &raw)) {
+    if (!readRegisters(
+        CATEGORY_CHANNELS,
+        ch,
+        CHANNELS_CURRENT_CONSUMPTION,
+        1,
+        &raw))
+    {
         return false;
     }
 
     current = raw * 0.54f;
+
     return true;
 }
 

@@ -994,19 +994,32 @@ void loop()
           }
 
           // ==========================
-          // Channel current (NEW)
+          // Channel current
           // ==========================
-          if (wavinController.readRegisters(WavinController::CATEGORY_CHANNELS, channel, WavinController::CHANNELS_CURRENT_CONSUMPTION, 1, registers))
+          uint16_t currentRaw;
+          float channelCurrent;
+
+          if (wavinController.getChannelCurrent(
+              channel,
+              currentRaw,
+              channelCurrent))
           {
-            uint16_t currentRaw = registers[0];
+              String topic = String(
+                  MQTT_PREFIX +
+                  mqttDeviceNameWithMac +
+                  "/" +
+                  channel +
+                  "/channel_current"
+              );
 
-            String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/channel_current");
-            String payload = String(currentRaw * 0.54f, 2);
+              String payload = String(channelCurrent, 2);
 
-            publishIfNewValue(topic,
-                              payload,
-                              currentRaw,
-                              &(lastSentValues[channel].currentRaw));
+              publishIfNewValue(
+                  topic,
+                  payload,
+                  currentRaw,
+                  &(lastSentValues[channel].currentRaw)
+              );
           }
 
           // If a thermostat for the channel is connected to the controller

@@ -224,7 +224,7 @@ bool WavinController::getInletTemperature(float& temp)
         return false;
     }
 
-    temp = raw / 10.0f;
+    temp = static_cast<int16_t>(raw) / 10.0f;
     return true;
 }
 
@@ -239,19 +239,19 @@ bool WavinController::getElementData(
 
     // Temperature = 0x04
     if (readRegisters(CATEGORY_ELEMENTS, el, EL_AIR_TEMP, 1, &raw) && raw != 0x7FFF)
-        temp = raw / 10.0f;
+        temp = static_cast<int16_t>(raw) / 10.0f;
     else
         temp = NAN;
 
     // Humidity = 0x07
     if (readRegisters(CATEGORY_ELEMENTS, el, EL_HUMIDITY, 1, &raw) && raw != 0x7FFF)
-        hum = raw;
+        hum = static_cast<float>(raw);
     else
         hum = NAN;
 
     // Dew point = 0x06
     if (readRegisters(CATEGORY_ELEMENTS, el, EL_DEW_POINT, 1, &raw) && raw != 0x7FFF)
-        dew = raw / 10.0f;
+        dew = static_cast<int16_t>(raw) / 10.0f;
     else
         dew = NAN;
 

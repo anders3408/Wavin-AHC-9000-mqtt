@@ -334,7 +334,6 @@ void publishConfiguration(uint8_t channel)
       "\"device_class\":\"humidity\","
       "\"state_class\":\"measurement\","
       "\"device\":" + deviceJson + ","
-      "\"entity_category\":\"diagnostic\","
       "\"qos\":0"
     "}"
   );
@@ -358,7 +357,6 @@ void publishConfiguration(uint8_t channel)
       "\"device_class\":\"temperature\","
       "\"state_class\":\"measurement\","
       "\"device\":" + deviceJson + ","
-      "\"entity_category\":\"diagnostic\","
       "\"qos\":0"
     "}"
   );
@@ -568,7 +566,7 @@ void publishSystemConfiguration()
       "\"manufacturer\":\"Wavin\","
       "\"model\":\"AHC 9000\","
       "\"sw_version\":\"" + deviceSwVersion + "\","
-      "\"name\":\"" + mqttDeviceNameWithMac + "\","
+      "\"name\":\"Wavin AHC 9000\","
       "\"identifiers\":[\"" + mqttDeviceNameWithMac + "\"]"
     "}"
   );
@@ -592,7 +590,6 @@ void publishSystemConfiguration()
       "\"payload_off\":\"False\","
       "\"device_class\":\"running\","
       "\"device\":" + deviceJson + ","
-      "\"entity_category\":\"diagnostic\","
       "\"qos\":0"
     "}"
   );
@@ -638,7 +635,6 @@ void publishSystemConfiguration()
       "\"device_class\":\"temperature\","
       "\"state_class\":\"measurement\","
       "\"device\":" + deviceJson + ","
-      "\"entity_category\":\"diagnostic\","
       "\"qos\":0"
     "}"
   );

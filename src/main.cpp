@@ -996,6 +996,57 @@ void publishModbusDiagnosticsConfiguration()
   }
 }
 
+// Phase 3.4: Identify failing request addresses without extra controller reads.
+void publishModbusFailureConfiguration()
+{
+  const String id = mqttDeviceNameWithMac;
+  const String base = MQTT_PREFIX + id + "/system/";
+  const String availability = MQTT_PREFIX + id + MQTT_ONLINE;
+  const String device = "{\"identifiers\":[\"" + id + "\"],\"name\":\"Wavin AHC 9000\",\"manufacturer\":\"Wavin\",\"model\":\"AHC 9000\"}";
+  const char* keys[] = {"modbus_read_errors", "modbus_write_errors", "modbus_timeout_errors",
+    "modbus_crc_errors", "modbus_length_errors", "modbus_header_errors",
+    "modbus_overflow_errors", "modbus_last_failed_request"};
+  const char* names[] = {"Modbus læsefejl", "Modbus skrivefejl", "Modbus timeout fejl",
+    "Modbus CRC fejl", "Modbus længdefejl", "Modbus svarheader fejl",
+    "Modbus bufferfejl", "Modbus seneste fejlede forespørgsel"};
+  for (uint8_t i = 0; i < 8; ++i) {
+    const String key(keys[i]);
+    String message = "{\"name\":\"" + String(names[i]) + "\",\"unique_id\":\"" + id + "_" + key +
+      "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
+      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\",";
+    if (i < 7) message += "\"state_class\":\"total_increasing\",";
+    message += "\"device\":" + device + "}";
+    const String topic = "homeassistant/sensor/" + id + "_" + key + "/config";
+    mqttClient.publish(topic.c_str(), message.c_str(), true);
+  }
+}
+
+void publishModbusFailureDiagnostics()
+{
+  if (!mqttClient.connected()) return;
+  const auto d = wavinController.getModbusFailureDetails();
+  const String base = MQTT_PREFIX + mqttDeviceNameWithMac + "/system/";
+  const char* keys[] = {"modbus_read_errors", "modbus_write_errors", "modbus_timeout_errors",
+    "modbus_crc_errors", "modbus_length_errors", "modbus_header_errors", "modbus_overflow_errors"};
+  const uint32_t values[] = {d.readErrors, d.writeErrors, d.timeoutErrors,
+    d.crcErrors, d.lengthErrors, d.headerErrors, d.overflowErrors};
+  for (uint8_t i = 0; i < 7; ++i)
+    mqttClient.publish((base + keys[i]).c_str(), String(values[i]).c_str(), true);
+  String last = "none";
+  if (d.hasFailure) {
+    const char* reason = "timeout";
+    switch (d.reason) {
+      case 2: reason = "crc"; break;
+      case 3: reason = "length"; break;
+      case 4: reason = "header_or_partial"; break;
+      case 5: reason = "overflow"; break;
+    }
+    last = String("cmd=") + d.command + ",cat=" + d.category + ",page=" + d.page +
+      ",index=" + d.index + ",count=" + d.count + ",reason=" + reason;
+  }
+  mqttClient.publish((base + "modbus_last_failed_request").c_str(), last.c_str(), true);
+}
+
 String modbusStatus(const WavinController::ModbusDiagnostics& stats)
 {
   if (!stats.hasAttemptedTransaction) return "unknown";
@@ -1110,6 +1161,7 @@ void loop()
           publishSystemConfiguration();
           publishEspDiagnosticsConfiguration();
           publishModbusDiagnosticsConfiguration();
+          publishModbusFailureConfiguration();
           publishThermostatSummaryConfiguration();
           lastThermostatLostCount = LAST_VALUE_UNKNOWN;
           lastThermostatUnknownCount = LAST_VALUE_UNKNOWN;
@@ -1497,6 +1549,7 @@ void loop()
         millis() - lastModbusDiagnosticsTime >= MODBUS_DIAGNOSTICS_INTERVAL_MS)
     {
       publishModbusDiagnostics(true);
+      publishModbusFailureDiagnostics();
       lastModbusDiagnosticsTime = millis();
       modbusDiagnosticsPending = false;
     }

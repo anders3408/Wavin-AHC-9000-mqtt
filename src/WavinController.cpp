@@ -24,6 +24,34 @@ WavinController::ModbusDiagnostics WavinController::getModbusDiagnostics() const
   return modbusDiagnostics;
 }
 
+WavinController::ModbusFailureDetails WavinController::getModbusFailureDetails() const
+{
+  return failureDetails;
+}
+
+void WavinController::recordRequestResult(bool successful, uint8_t command,
+    uint8_t category, uint8_t page, uint8_t index, uint8_t count)
+{
+  recordTransaction(successful);
+  if (successful) return;
+  if (command == MODBUS_READ_REGISTER) ++failureDetails.readErrors;
+  else ++failureDetails.writeErrors;
+  switch (receiveFailureReason) {
+    case 2: ++failureDetails.crcErrors; break;
+    case 3: ++failureDetails.lengthErrors; break;
+    case 4: ++failureDetails.headerErrors; break;
+    case 5: ++failureDetails.overflowErrors; break;
+    default: ++failureDetails.timeoutErrors; break;
+  }
+  failureDetails.command = command;
+  failureDetails.category = category;
+  failureDetails.page = page;
+  failureDetails.index = index;
+  failureDetails.count = count;
+  failureDetails.reason = receiveFailureReason;
+  failureDetails.hasFailure = true;
+}
+
 void WavinController::recordTransaction(bool successful)
 {
   modbusDiagnostics.hasAttemptedTransaction = true;
@@ -70,7 +98,8 @@ bool WavinController::receive(
   uint8_t cmdtype,
   uint8_t expectedRegisterCount)
 {
-  if (expectedRegisterCount == 0 || expectedRegisterCount > 22) return false;
+  receiveFailureReason = 1;
+  if (expectedRegisterCount == 0 || expectedRegisterCount > 22) { receiveFailureReason = 3; return false; }
   uint8_t buffer[RECIEVE_BUFFER_SIZE];
   uint8_t n = 0;
   unsigned long start_time = millis();
@@ -81,7 +110,7 @@ bool WavinController::receive(
     {
       buffer[n] = Serial.read();
       n++;
-      if (n >= 3 && buffer[2] > RECIEVE_BUFFER_SIZE - 5) return false;
+      if (n >= 3 && buffer[2] > RECIEVE_BUFFER_SIZE - 5) { receiveFailureReason = 5; return false; }
 
       if (n > 5 &&
           buffer[0] == MODBUS_DEVICE &&
@@ -93,6 +122,7 @@ bool WavinController::receive(
 
         if (crc != 0)
         {
+          receiveFailureReason = 2;
           return false;
         }
 
@@ -103,6 +133,7 @@ bool WavinController::receive(
         // of registers that the caller has allocated space for.
         if (buffer[2] != expectedDataBytes)
         {
+          receiveFailureReason = 3;
           return false;
         }
 
@@ -123,6 +154,8 @@ bool WavinController::receive(
     yield();
   }
 
+  // A partial or unexpected reply may be a header mismatch, rather than silence.
+  if (n > 0) receiveFailureReason = 4;
   return false;
 }
 
@@ -162,7 +195,7 @@ bool WavinController::readRegisters(uint8_t category, uint8_t page, uint8_t inde
   transmit(message, 8);
 
   bool ok = receive(reply, MODBUS_READ_REGISTER, count);
-  recordTransaction(ok);
+  recordRequestResult(ok, MODBUS_READ_REGISTER, category, page, index, count);
   return ok;
 }
 
@@ -189,7 +222,7 @@ bool WavinController::writeRegister(uint8_t category, uint8_t page, uint8_t inde
 
   uint16_t reply[1];
   bool ok = receive(reply, MODBUS_WRITE_REGISTER, 1);
-  recordTransaction(ok);
+  recordRequestResult(ok, MODBUS_WRITE_REGISTER, category, page, index, 1);
   return ok; // Receive reply but ignore its register value
 }
 
@@ -217,7 +250,7 @@ bool WavinController::writeMaskedRegister(uint8_t category, uint8_t page, uint8_
 
   uint16_t reply[1];
   bool ok = receive(reply, MODBUS_WRITE_MASKED_REGISTER, 1);
-  recordTransaction(ok);
+  recordRequestResult(ok, MODBUS_WRITE_MASKED_REGISTER, category, page, index, 1);
   return ok; // Receive reply but ignore its register value
 }
 

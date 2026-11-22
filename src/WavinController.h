@@ -21,6 +21,27 @@ class WavinController
     };
     ModbusDiagnostics getModbusDiagnostics() const;
 
+    // Phase 3.4: Details of the latest failed request (RAM-only).
+    // Error reasons: timeout, crc, length, header, overflow.
+    struct ModbusFailureDetails {
+      uint32_t readErrors;
+      uint32_t writeErrors;
+      uint32_t timeoutErrors;
+      uint32_t crcErrors;
+      uint32_t lengthErrors;
+      uint32_t headerErrors;
+      uint32_t overflowErrors;
+      uint8_t command;
+      uint8_t category;
+      uint8_t page;
+      uint8_t index;
+      uint8_t count;
+      uint8_t reason;
+      bool hasFailure;
+    };
+    ModbusFailureDetails getModbusFailureDetails() const;
+
+
     // NEW helper methods
     bool getPumpState(uint8_t& tevent);
     bool getInletTemperature(float& temp);
@@ -120,6 +141,12 @@ class WavinController
   private:
     ModbusDiagnostics modbusDiagnostics = {0, 0, 0, 0, false, false};
     void recordTransaction(bool successful);
+    void recordRequestResult(bool successful, uint8_t command, uint8_t category,
+                             uint8_t page, uint8_t index, uint8_t count);
+    // 1 timeout, 2 crc, 3 length, 4 header, 5 overflow
+    uint8_t receiveFailureReason = 1;
+    ModbusFailureDetails failureDetails = {};
+
     uint8_t txEnablePin;
     uint16_t recieveTimeoutMs;
     void transmit(uint8_t *data, uint8_t lenght);

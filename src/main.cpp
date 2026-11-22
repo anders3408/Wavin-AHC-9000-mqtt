@@ -1047,6 +1047,64 @@ void publishModbusFailureDiagnostics()
   mqttClient.publish((base + "modbus_last_failed_request").c_str(), last.c_str(), true);
 }
 
+// Phase 3.4.1: Read-only transaction category and response timing diagnostics.
+void publishModbusCategoryTimingConfiguration()
+{
+  const String id = mqttDeviceNameWithMac;
+  const String base = MQTT_PREFIX + id + "/system/";
+  const String availability = MQTT_PREFIX + id + MQTT_ONLINE;
+  const String device = "{\"identifiers\":[\"" + id + "\"],\"name\":\"Wavin AHC 9000\",\"manufacturer\":\"Wavin\",\"model\":\"AHC 9000\"}";
+  const char* labels[] = {"Main", "Elements", "Packed data", "Channels", "Relays", "Clock", "Schedules", "Info", "Other"};
+  for (uint8_t i = 0; i < WavinController::DIAGNOSTIC_CATEGORY_COUNT; ++i) {
+    for (uint8_t j = 0; j < 2; ++j) {
+      const String key = "modbus_cat" + String(i) + (j == 0 ? "_success" : "_errors");
+      const String name = "Modbus " + String(labels[i]) + (j == 0 ? " success" : " errors");
+      const String message = "{\"name\":\"" + name + "\",\"unique_id\":\"" + id + "_" + key +
+        "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
+        "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\",\"state_class\":\"total_increasing\",\"device\":" + device + "}";
+      mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), message.c_str(), true);
+    }
+  }
+  const char* keys[] = {"modbus_first_byte_last_ms", "modbus_first_byte_avg_ms", "modbus_first_byte_max_ms",
+    "modbus_complete_last_ms", "modbus_complete_avg_ms", "modbus_complete_max_ms"};
+  for (uint8_t i = 0; i < 6; ++i) {
+    const String key(keys[i]);
+    const String message = "{\"name\":\"Wavin " + key + "\",\"unique_id\":\"" + id + "_" + key +
+      "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
+      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\",\"unit_of_measurement\":\"ms\",\"state_class\":\"measurement\",\"device\":" + device + "}";
+    mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), message.c_str(), true);
+  }
+  const char* counters[] = {"modbus_first_byte_samples", "modbus_completed_responses", "modbus_no_byte_timeouts"};
+  for (uint8_t i = 0; i < 3; ++i) {
+    const String key(counters[i]);
+    const String message = "{\"name\":\"Wavin " + key + "\",\"unique_id\":\"" + id + "_" + key +
+      "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
+      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\",\"state_class\":\"total_increasing\",\"device\":" + device + "}";
+    mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), message.c_str(), true);
+  }
+}
+
+void publishModbusCategoryTimingDiagnostics()
+{
+  if (!mqttClient.connected()) return;
+  const String base = MQTT_PREFIX + mqttDeviceNameWithMac + "/system/";
+  for (uint8_t i = 0; i < WavinController::DIAGNOSTIC_CATEGORY_COUNT; ++i) {
+    const auto d = wavinController.getCategoryDiagnostics(i);
+    mqttClient.publish((base + "modbus_cat" + String(i) + "_success").c_str(), String(d.successes).c_str(), true);
+    mqttClient.publish((base + "modbus_cat" + String(i) + "_errors").c_str(), String(d.errors).c_str(), true);
+  }
+  const auto t = wavinController.getResponseTimingDiagnostics();
+  const char* keys[] = {"modbus_first_byte_last_ms", "modbus_first_byte_avg_ms", "modbus_first_byte_max_ms",
+    "modbus_complete_last_ms", "modbus_complete_avg_ms", "modbus_complete_max_ms",
+    "modbus_first_byte_samples", "modbus_completed_responses", "modbus_no_byte_timeouts"};
+  const uint32_t values[] = {t.firstByteLastMs,
+    t.firstByteSamples ? t.firstByteTotalMs / t.firstByteSamples : 0, t.firstByteMaxMs,
+    t.completeLastMs, t.completedResponses ? t.completeTotalMs / t.completedResponses : 0,
+    t.completeMaxMs, t.firstByteSamples, t.completedResponses, t.noByteTimeouts};
+  for (uint8_t i = 0; i < 9; ++i)
+    mqttClient.publish((base + keys[i]).c_str(), String(values[i]).c_str(), true);
+}
+
 String modbusStatus(const WavinController::ModbusDiagnostics& stats)
 {
   if (!stats.hasAttemptedTransaction) return "unknown";
@@ -1162,6 +1220,7 @@ void loop()
           publishEspDiagnosticsConfiguration();
           publishModbusDiagnosticsConfiguration();
           publishModbusFailureConfiguration();
+          publishModbusCategoryTimingConfiguration();
           publishThermostatSummaryConfiguration();
           lastThermostatLostCount = LAST_VALUE_UNKNOWN;
           lastThermostatUnknownCount = LAST_VALUE_UNKNOWN;
@@ -1550,6 +1609,7 @@ void loop()
     {
       publishModbusDiagnostics(true);
       publishModbusFailureDiagnostics();
+      publishModbusCategoryTimingDiagnostics();
       lastModbusDiagnosticsTime = millis();
       modbusDiagnosticsPending = false;
     }

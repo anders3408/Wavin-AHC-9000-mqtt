@@ -41,6 +41,27 @@ class WavinController
     };
     ModbusFailureDetails getModbusFailureDetails() const;
 
+    // Phase 3.4.1: Counters for category IDs 0..7, plus slot 8 for other IDs.
+    static const uint8_t DIAGNOSTIC_CATEGORY_COUNT = 9;
+    struct CategoryDiagnostics {
+      uint32_t successes;
+      uint32_t errors;
+    };
+    struct ResponseTimingDiagnostics {
+      uint32_t completedResponses;
+      uint32_t firstByteSamples;
+      uint32_t noByteTimeouts;
+      uint32_t firstByteTotalMs;
+      uint32_t completeTotalMs;
+      uint32_t firstByteLastMs;
+      uint32_t firstByteMaxMs;
+      uint32_t completeLastMs;
+      uint32_t completeMaxMs;
+    };
+    CategoryDiagnostics getCategoryDiagnostics(uint8_t category) const;
+    ResponseTimingDiagnostics getResponseTimingDiagnostics() const;
+
+
 
     // NEW helper methods
     bool getPumpState(uint8_t& tevent);
@@ -146,6 +167,12 @@ class WavinController
     // 1 timeout, 2 crc, 3 length, 4 header, 5 overflow
     uint8_t receiveFailureReason = 1;
     ModbusFailureDetails failureDetails = {};
+    CategoryDiagnostics categoryDiagnostics[DIAGNOSTIC_CATEGORY_COUNT] = {};
+    ResponseTimingDiagnostics responseTimingDiagnostics = {};
+    bool responseFirstByteSeen = false;
+    uint32_t responseFirstByteMs = 0;
+    uint32_t responseCompleteMs = 0;
+
 
     uint8_t txEnablePin;
     uint16_t recieveTimeoutMs;

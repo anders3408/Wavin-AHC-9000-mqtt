@@ -29,11 +29,41 @@ WavinController::ModbusFailureDetails WavinController::getModbusFailureDetails()
   return failureDetails;
 }
 
+WavinController::CategoryDiagnostics WavinController::getCategoryDiagnostics(uint8_t category) const
+{
+  return categoryDiagnostics[category < 8 ? category : 8];
+}
+
+WavinController::ResponseTimingDiagnostics WavinController::getResponseTimingDiagnostics() const
+{
+  return responseTimingDiagnostics;
+}
+
 void WavinController::recordRequestResult(bool successful, uint8_t command,
     uint8_t category, uint8_t page, uint8_t index, uint8_t count)
 {
   recordTransaction(successful);
-  if (successful) return;
+  CategoryDiagnostics &categoryStats = categoryDiagnostics[category < 8 ? category : 8];
+  if (successful) ++categoryStats.successes;
+  else ++categoryStats.errors;
+
+  if (responseFirstByteSeen) {
+    ++responseTimingDiagnostics.firstByteSamples;
+    responseTimingDiagnostics.firstByteLastMs = responseFirstByteMs;
+    if (responseFirstByteMs > responseTimingDiagnostics.firstByteMaxMs)
+      responseTimingDiagnostics.firstByteMaxMs = responseFirstByteMs;
+    responseTimingDiagnostics.firstByteTotalMs += responseFirstByteMs;
+  } else if (!successful && receiveFailureReason == 1) {
+    ++responseTimingDiagnostics.noByteTimeouts;
+  }
+  if (successful) {
+    ++responseTimingDiagnostics.completedResponses;
+    responseTimingDiagnostics.completeLastMs = responseCompleteMs;
+    if (responseCompleteMs > responseTimingDiagnostics.completeMaxMs)
+      responseTimingDiagnostics.completeMaxMs = responseCompleteMs;
+    responseTimingDiagnostics.completeTotalMs += responseCompleteMs;
+    return;
+  }
   if (command == MODBUS_READ_REGISTER) ++failureDetails.readErrors;
   else ++failureDetails.writeErrors;
   switch (receiveFailureReason) {
@@ -99,6 +129,9 @@ bool WavinController::receive(
   uint8_t expectedRegisterCount)
 {
   receiveFailureReason = 1;
+  responseFirstByteSeen = false;
+  responseFirstByteMs = 0;
+  responseCompleteMs = 0;
   if (expectedRegisterCount == 0 || expectedRegisterCount > 22) { receiveFailureReason = 3; return false; }
   uint8_t buffer[RECIEVE_BUFFER_SIZE];
   uint8_t n = 0;
@@ -109,6 +142,10 @@ bool WavinController::receive(
     while (Serial.available() && n < RECIEVE_BUFFER_SIZE)
     {
       buffer[n] = Serial.read();
+      if (!responseFirstByteSeen) {
+        responseFirstByteSeen = true;
+        responseFirstByteMs = millis() - start_time;
+      }
       n++;
       if (n >= 3 && buffer[2] > RECIEVE_BUFFER_SIZE - 5) { receiveFailureReason = 5; return false; }
 
@@ -146,6 +183,7 @@ bool WavinController::receive(
             static_cast<uint16_t>(buffer[4 + j * 2]);
         }
 
+        responseCompleteMs = millis() - start_time;
         return true;
       }
     }

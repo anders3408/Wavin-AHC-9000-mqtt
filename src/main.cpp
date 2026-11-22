@@ -1159,6 +1159,35 @@ void publishModbusUartConfiguration()
   }
 }
 
+// Phase 3.4.4: Discovery for read-only retry results.
+void publishModbusRetryConfiguration()
+{
+  const String id = mqttDeviceNameWithMac;
+  const String base = MQTT_PREFIX + id + "/system/";
+  const String availability = MQTT_PREFIX + id + MQTT_ONLINE;
+  const String device = "{\"identifiers\":[\"" + id + "\"],\"name\":\"Wavin AHC 9000\",\"manufacturer\":\"Wavin\",\"model\":\"AHC 9000\"}";
+  const char* keys[] = {"modbus_retry_attempts", "modbus_retry_success", "modbus_retry_failed"};
+  const char* names[] = {"Wavin Modbus retry forsøg", "Wavin Modbus retry lykkedes", "Wavin Modbus retry mislykkedes"};
+  for (uint8_t i = 0; i < 3; ++i) {
+    const String key(keys[i]);
+    const String message = "{\"name\":\"" + String(names[i]) + "\",\"unique_id\":\"" + id + "_" + key +
+      "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
+      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\"," +
+      "\"state_class\":\"total_increasing\",\"device\":" + device + "}";
+    mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), message.c_str(), true);
+  }
+}
+
+void publishModbusRetryDiagnostics()
+{
+  if (!mqttClient.connected()) return;
+  const auto d = wavinController.getReadRetryDiagnostics();
+  const String base = MQTT_PREFIX + mqttDeviceNameWithMac + "/system/";
+  mqttClient.publish((base + "modbus_retry_attempts").c_str(), String(d.attempts).c_str(), true);
+  mqttClient.publish((base + "modbus_retry_success").c_str(), String(d.recovered).c_str(), true);
+  mqttClient.publish((base + "modbus_retry_failed").c_str(), String(d.failed).c_str(), true);
+}
+
 void publishModbusUartDiagnostics()
 {
   if (!mqttClient.connected()) return;
@@ -1291,6 +1320,7 @@ void loop()
           publishModbusFailureConfiguration();
           publishModbusCategoryTimingConfiguration();
           publishModbusUartConfiguration();
+          publishModbusRetryConfiguration();
           publishThermostatSummaryConfiguration();
           lastThermostatLostCount = LAST_VALUE_UNKNOWN;
           lastThermostatUnknownCount = LAST_VALUE_UNKNOWN;
@@ -1683,6 +1713,7 @@ void loop()
       publishModbusFailureDiagnostics();
       publishModbusCategoryTimingDiagnostics();
       publishModbusUartDiagnostics();
+      publishModbusRetryDiagnostics();
       lastModbusDiagnosticsTime = millis();
       modbusDiagnosticsPending = false;
     }

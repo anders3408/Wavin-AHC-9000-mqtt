@@ -45,6 +45,11 @@ WavinController::UartDiagnostics WavinController::getUartDiagnostics() const
   return uartDiagnostics;
 }
 
+WavinController::ReadRetryDiagnostics WavinController::getReadRetryDiagnostics() const
+{
+  return readRetryDiagnostics;
+}
+
 void WavinController::recordRequestResult(bool successful, uint8_t command,
     uint8_t category, uint8_t page, uint8_t index, uint8_t count)
 {
@@ -267,7 +272,21 @@ bool WavinController::readRegisters(uint8_t category, uint8_t page, uint8_t inde
   transmit(message, 8);
 
   bool ok = receive(reply, MODBUS_READ_REGISTER, count);
+  // Record the first physical request even if it will be retried.
+  // This keeps all existing raw error and timing diagnostics comparable.
+  const bool retryable = !ok && receiveFailureReason == 1 && !responseFirstByteSeen;
   recordRequestResult(ok, MODBUS_READ_REGISTER, category, page, index, count);
+  if (!retryable) return ok;
+
+  ++readRetryDiagnostics.attempts;
+  // Wait beyond the existing minimum transaction gap before one retry.
+  // delay() yields to the ESP8266 Wi-Fi stack and watchdog.
+  delay(READ_RETRY_DELAY_MS);
+  transmit(message, 8);
+  ok = receive(reply, MODBUS_READ_REGISTER, count);
+  recordRequestResult(ok, MODBUS_READ_REGISTER, category, page, index, count);
+  if (ok) ++readRetryDiagnostics.recovered;
+  else ++readRetryDiagnostics.failed;
   return ok;
 }
 

@@ -73,6 +73,17 @@ class WavinController
     };
     UartDiagnostics getUartDiagnostics() const;
 
+    // Phase 3.4.4: Logical read retries (not raw transaction counts).
+    // Raw Modbus/category/failure counters continue to count each wire attempt.
+    struct ReadRetryDiagnostics {
+      uint32_t attempts;
+      uint32_t recovered;
+      uint32_t failed;
+    };
+    ReadRetryDiagnostics getReadRetryDiagnostics() const;
+    static const uint16_t READ_RETRY_DELAY_MS = 20;
+
+
 
 
 
@@ -183,6 +194,7 @@ class WavinController
     CategoryDiagnostics categoryDiagnostics[DIAGNOSTIC_CATEGORY_COUNT] = {};
     ResponseTimingDiagnostics responseTimingDiagnostics = {};
     UartDiagnostics uartDiagnostics = {};
+    ReadRetryDiagnostics readRetryDiagnostics = {};
     bool responseFirstByteSeen = false;
     uint32_t responseFirstByteMs = 0;
     uint32_t responseCompleteMs = 0;

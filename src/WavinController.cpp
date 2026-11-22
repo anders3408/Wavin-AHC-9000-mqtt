@@ -2,13 +2,14 @@
 #include "WavinController.h"
 
 
-WavinController::WavinController(uint8_t pin, bool swapSerialPins, uint16_t timeout_ms)
+WavinController::WavinController(uint8_t pin, bool swapSerialPins, uint16_t timeout_ms, uint16_t minGapMs)
 {
   txEnablePin = pin;
   digitalWrite(pin, LOW);
   pinMode(pin, OUTPUT);
 
   recieveTimeoutMs = timeout_ms;
+  minTransactionGapMs = minGapMs;
 
   Serial.begin(38400);
 
@@ -42,6 +43,10 @@ WavinController::ResponseTimingDiagnostics WavinController::getResponseTimingDia
 void WavinController::recordRequestResult(bool successful, uint8_t command,
     uint8_t category, uint8_t page, uint8_t index, uint8_t count)
 {
+  // Mark the end of this transaction after receive() has returned.
+  // millis() subtraction is safe across the timer rollover.
+  lastTransactionEndMs = millis();
+  hasCompletedTransaction = true;
   recordTransaction(successful);
   CategoryDiagnostics &categoryStats = categoryDiagnostics[category < 8 ? category : 8];
   if (successful) ++categoryStats.successes;
@@ -200,6 +205,15 @@ bool WavinController::receive(
 
 void WavinController::transmit(uint8_t *data, uint8_t length)
 {
+  // Phase 3.4.2: enforce a minimum inter-transaction quiet period.
+  // This applies to reads and both write commands, including after timeouts.
+  // It never delays the first request after boot.
+  if (hasCompletedTransaction && minTransactionGapMs > 0)
+  {
+    while ((uint32_t)(millis() - lastTransactionEndMs) < minTransactionGapMs)
+      yield();
+  }
+
   // Empty recieve buffer before sending
   while (Serial.read() != -1);
 

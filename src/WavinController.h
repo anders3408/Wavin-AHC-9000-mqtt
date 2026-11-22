@@ -4,7 +4,7 @@
 class WavinController
 {
   public:
-    WavinController(uint8_t pin, bool swapSerialPins, uint16_t timeout_ms);
+    WavinController(uint8_t pin, bool swapSerialPins, uint16_t timeout_ms, uint16_t minTransactionGapMs = 10);
     bool readRegisters(uint8_t category, uint8_t page, uint8_t index, uint8_t count, uint16_t *reply);
     bool writeRegister(uint8_t category, uint8_t page, uint8_t index, uint16_t value);
     bool writeMaskedRegister(uint8_t category, uint8_t page, uint8_t index, uint16_t value, uint16_t mask);
@@ -176,6 +176,10 @@ class WavinController
 
     uint8_t txEnablePin;
     uint16_t recieveTimeoutMs;
+    // Minimum quiet time after a completed transaction before sending another.
+    uint16_t minTransactionGapMs;
+    uint32_t lastTransactionEndMs = 0;
+    bool hasCompletedTransaction = false;
     void transmit(uint8_t *data, uint8_t lenght);
     bool receive(
       uint16_t* reply,

@@ -43,6 +43,12 @@ PubSubClient mqttClient(wifiClient);
 unsigned long lastUpdateTime = 0;
 
 const uint16_t POLL_TIME_MS = 5000;
+const unsigned long WIFI_RETRY_MS = 10000;
+const unsigned long MQTT_RETRY_MS = 5000;
+unsigned long lastWifiAttempt = 0;
+unsigned long lastMqttAttempt = 0;
+const bool CONFIGURE_STANDBY_ON_DISCOVERY = false; // Opt-in: avoids changing controller on reboot
+
 
 struct lastKnownValue_t {
   uint16_t temperature;
@@ -82,85 +88,88 @@ const uint16_t LAST_VALUE_UNKNOWN = 0xFFFF;
 bool configurationPublished[WavinController::NUMBER_OF_CHANNELS];
 
 
-// Read a float value from a non zero terminated array of bytes and
-// return 10 times the value as an integer
-uint16_t temperatureFromString(String payload)
-{
-  float targetf = payload.toFloat();
-  return (unsigned short)(targetf * 10);
-}
-
-
-// Returns temperature in degrees with one decimal
+// Only accept well-formed commands addressed to one of our 16 channels.
+// Never pass an unchecked MQTT topic or temperature to the controller.
 String temperatureAsFloatString(uint16_t temperature)
 {
-  float temperatureAsFloat = ((float)temperature) / 10;
-  return String(temperatureAsFloat, 1);
+  return String(((float)temperature) / 10, 1);
 }
 
-
-uint8_t getIdFromTopic(char* topic)
+bool parseCommandChannel(const String& topic, const String& suffix, uint8_t& channel)
 {
-  unsigned int startIndex = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/").length();
-  int i = 0;
-  uint8_t result = 0;
-
-  while(topic[startIndex+i] != '/' && i<3)
-  {
-    result = result * 10 + (topic[startIndex+i]-'0');
-    i++;
+  const String prefix = MQTT_PREFIX + mqttDeviceNameWithMac + "/";
+  if (!topic.startsWith(prefix) || !topic.endsWith(suffix)) return false;
+  String number = topic.substring(prefix.length(), topic.length() - suffix.length());
+  if (number.length() == 0 || number.length() > 2) return false;
+  uint16_t parsed = 0;
+  for (unsigned int i = 0; i < number.length(); ++i) {
+    if (number[i] < '0' || number[i] > '9') return false;
+    parsed = parsed * 10 + (number[i] - '0');
   }
-
-  return result;
+  if (parsed >= WavinController::NUMBER_OF_CHANNELS) return false;
+  channel = parsed;
+  return true;
 }
 
+bool parseTemperature(const String& payload, uint16_t& tenths)
+{
+  if (payload.length() == 0 || payload.length() > 12) return false;
+  bool decimalSeen = false;
+  bool digitSeen = false;
+  for (unsigned int i = 0; i < payload.length(); ++i) {
+    char c = payload[i];
+    if (c == '.') {
+      if (decimalSeen) return false;
+      decimalSeen = true;
+    } else if (c >= '0' && c <= '9') {
+      digitSeen = true;
+    } else return false;
+  }
+  if (!digitSeen) return false;
+  float value = payload.toFloat();
+  if (!isfinite(value) || value < MIN_TEMP || value > MAX_TEMP) return false;
+  float tenthsFloat = value * 10.0f;
+  uint16_t rounded = (uint16_t)(tenthsFloat + 0.5f);
+  // Wavin stores temperatures in tenths of a degree; reject values
+  // which cannot be represented without silently changing the request.
+  if (fabsf(tenthsFloat - rounded) > 0.01f) return false;
+  tenths = rounded;
+  return true;
+}
 
 void mqttCallback(char* topic, byte* payload, unsigned int length)
 {
-  String topicString = String(topic);
-  
-  char terminatedPayload[length+1];
-  for(unsigned int i=0; i<length; i++)
-  {
-    terminatedPayload[i] = payload[i];
-  }
-  terminatedPayload[length] = 0;
-  String payloadString = String(terminatedPayload);
+  if (length == 0 || length > 32) return;
+  char terminatedPayload[33];
+  memcpy(terminatedPayload, payload, length);
+  terminatedPayload[length] = '\0';
+  String value(terminatedPayload);
+  String commandTopic(topic);
+  uint8_t channel;
+  bool success = false;
 
-  uint8_t id = getIdFromTopic(topic);
+  if (parseCommandChannel(commandTopic, MQTT_SUFFIX_SETPOINT_SET, channel)) {
+    uint16_t target;
+    if (!parseTemperature(value, target)) return;
+    success = wavinController.writeRegister(WavinController::CATEGORY_PACKED_DATA,
+      channel, WavinController::PACKED_DATA_MANUAL_TEMPERATURE, target);
+  } else if (parseCommandChannel(commandTopic, MQTT_SUFFIX_MODE_SET, channel)) {
+    uint16_t mode;
+    if (value == MQTT_VALUE_MODE_MANUAL)
+      mode = WavinController::PACKED_DATA_CONFIGURATION_MODE_MANUAL;
+    else if (value == MQTT_VALUE_MODE_STANDBY)
+      mode = WavinController::PACKED_DATA_CONFIGURATION_MODE_STANDBY;
+    else return;
+    success = wavinController.writeMaskedRegister(WavinController::CATEGORY_PACKED_DATA,
+      channel, WavinController::PACKED_DATA_CONFIGURATION, mode,
+      (uint16_t)~WavinController::PACKED_DATA_CONFIGURATION_MODE_MASK);
+  } else return;
 
-  if(topicString.endsWith(MQTT_SUFFIX_SETPOINT_SET))
-  {
-    uint16_t target = temperatureFromString(payloadString);
-    wavinController.writeRegister(WavinController::CATEGORY_PACKED_DATA, id, WavinController::PACKED_DATA_MANUAL_TEMPERATURE, target);
-  }
-  else if(topicString.endsWith(MQTT_SUFFIX_MODE_SET))
-  {
-    if(payloadString == MQTT_VALUE_MODE_MANUAL) 
-    {
-      wavinController.writeMaskedRegister(
-        WavinController::CATEGORY_PACKED_DATA,
-        id,
-        WavinController::PACKED_DATA_CONFIGURATION,
-        WavinController::PACKED_DATA_CONFIGURATION_MODE_MANUAL,
-        ~WavinController::PACKED_DATA_CONFIGURATION_MODE_MASK);
-    }
-    else if (payloadString == MQTT_VALUE_MODE_STANDBY)
-    {
-      wavinController.writeMaskedRegister(
-        WavinController::CATEGORY_PACKED_DATA, 
-        id, 
-        WavinController::PACKED_DATA_CONFIGURATION, 
-        WavinController::PACKED_DATA_CONFIGURATION_MODE_STANDBY, 
-        ~WavinController::PACKED_DATA_CONFIGURATION_MODE_MASK);
-    }
-  }
-
-  // Force re-read of registers from controller now
+  // A write failure is not treated as success; read back the actual
+  // controller state on the next poll, without blindly retrying a write.
+  (void)success;
   lastUpdateTime = 0;
-
 }
-
 
 void resetLastSentValues()
 {
@@ -737,6 +746,8 @@ void setup()
 
   mqttClient.setServer(MQTT_SERVER.c_str(), MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
 }
 
 
@@ -744,16 +755,19 @@ void loop()
 {
   if (WiFi.status() != WL_CONNECTED)
   {
+    if (lastWifiAttempt != 0 && millis() - lastWifiAttempt < WIFI_RETRY_MS) return;
+    lastWifiAttempt = millis();
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID.c_str(), WIFI_PASS.c_str());
-
-    if (WiFi.waitForConnectResult() != WL_CONNECTED) return;
+    return; // Wi-Fi association continues asynchronously
   }
 
   if (WiFi.status() == WL_CONNECTED)
   {
     if (!mqttClient.connected())
     {
+      if (lastMqttAttempt != 0 && millis() - lastMqttAttempt < MQTT_RETRY_MS) return;
+      lastMqttAttempt = millis();
       String will = String(MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE);
       if (mqttClient.connect(mqttClientWithMac.c_str(), MQTT_USER.c_str(), MQTT_PASS.c_str(), will.c_str(), 1, true, "False") )
       {
@@ -785,7 +799,7 @@ void loop()
         return;
     }
 
-    if (lastUpdateTime + POLL_TIME_MS < millis())
+    if (millis() - lastUpdateTime >= POLL_TIME_MS)
     {
       lastUpdateTime = millis();
 
@@ -926,7 +940,8 @@ void loop()
           if(!configurationPublished[channel])
           {
             uint16_t standbyTemperature = STANDBY_TEMPERATURE_DEG * 10;
-            wavinController.writeRegister(WavinController::CATEGORY_PACKED_DATA, channel, WavinController::PACKED_DATA_STANDBY_TEMPERATURE, standbyTemperature);
+            if (CONFIGURE_STANDBY_ON_DISCOVERY)
+              wavinController.writeRegister(WavinController::CATEGORY_PACKED_DATA, channel, WavinController::PACKED_DATA_STANDBY_TEMPERATURE, standbyTemperature);
 
             publishConfiguration(channel);
           }

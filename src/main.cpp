@@ -45,6 +45,9 @@ unsigned long lastUpdateTime = 0;
 const uint16_t POLL_TIME_MS = 5000;
 const unsigned long WIFI_RETRY_MS = 10000;
 const unsigned long MQTT_RETRY_MS = 5000;
+const unsigned long ESP_DIAGNOSTICS_INTERVAL_MS = 60000;
+unsigned long lastEspDiagnosticsTime = 0;
+bool espDiagnosticsPending = true;
 unsigned long lastWifiAttempt = 0;
 unsigned long lastMqttAttempt = 0;
 const bool CONFIGURE_STANDBY_ON_DISCOVERY = false; // Opt-in: avoids changing controller on reboot
@@ -805,6 +808,67 @@ void publishSystemConfiguration()
   mqttClient.publish(actuatorDurationTopic.c_str(), actuatorDurationMessage.c_str(), true);
 }
 
+// Phase 3.1: ESP8266 diagnostics. Uses the existing device identity and
+// system availability; does not read or write any Wavin controller registers.
+void publishEspDiagnosticsConfiguration()
+{
+  const String deviceId = mqttDeviceNameWithMac;
+  const String availability = MQTT_PREFIX + deviceId + MQTT_ONLINE;
+  const String stateBase = MQTT_PREFIX + deviceId + "/system/";
+  const String deviceJson = "{\"manufacturer\":\"Wavin\",\"model\":\"AHC 9000\",\"sw_version\":\"" +
+                            deviceSwVersion + "\",\"name\":\"Wavin AHC 9000\",\"identifiers\":[\"" + deviceId + "\"]}";
+
+  // Separate discovery packets keep peak heap usage down. Discovery remains
+  // retained and uses the same system-wide MQTT availability as pump sensors.
+  struct DiagnosticDefinition {
+    const char* key;
+    const char* name;
+    const char* icon;
+    const char* extra;
+  };
+  const DiagnosticDefinition diagnostics[] = {
+    {"esp_uptime", "ESP8266 oppetid", "mdi:clock-outline", "\"unit_of_measurement\":\"s\",\"device_class\":\"duration\",\"state_class\":\"measurement\","},
+    {"esp_free_heap", "ESP8266 ledig hukommelse", "mdi:memory", "\"unit_of_measurement\":\"B\",\"state_class\":\"measurement\","},
+    {"esp_wifi_rssi", "ESP8266 Wi-Fi signal", "mdi:wifi", "\"unit_of_measurement\":\"dBm\",\"device_class\":\"signal_strength\",\"state_class\":\"measurement\","},
+    {"esp_reset_reason", "ESP8266 genstartsårsag", "mdi:restart", ""},
+    {"esp_ip", "ESP8266 IP-adresse", "mdi:ip-network", ""}
+  };
+
+  for (const auto& diagnostic : diagnostics)
+  {
+    String topic = "homeassistant/sensor/" + deviceId + "_" + diagnostic.key + "/config";
+    String message = "{\"name\":\"" + String(diagnostic.name) +
+      "\",\"unique_id\":\"" + deviceId + "_" + diagnostic.key +
+      "_id\",\"state_topic\":\"" + stateBase + diagnostic.key +
+      "\",\"availability_topic\":\"" + availability +
+      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\"," +
+      String(diagnostic.extra) + "\"icon\":\"" + diagnostic.icon +
+      "\",\"entity_category\":\"diagnostic\",\"device\":" + deviceJson + "}";
+    mqttClient.publish(topic.c_str(), message.c_str(), true);
+  }
+}
+
+void publishEspDiagnostics()
+{
+  if (!mqttClient.connected()) return;
+
+  const String base = MQTT_PREFIX + mqttDeviceNameWithMac + "/system/";
+  // Uptime is seconds since boot; millis() wraps after ~49.7 days.
+  const String uptime = String(millis() / 1000UL);
+  const String freeHeap = String(ESP.getFreeHeap());
+  const String wifiRssi = String(WiFi.RSSI());
+  const String resetReason = ESP.getResetReason();
+  const String ip = WiFi.localIP().toString();
+
+  // Retained state: new Home Assistant subscribers receive the latest values.
+  // Slow-changing values are refreshed at the same 60-second cadence.
+  mqttClient.publish((base + "esp_uptime").c_str(), uptime.c_str(), true);
+  mqttClient.publish((base + "esp_free_heap").c_str(), freeHeap.c_str(), true);
+  mqttClient.publish((base + "esp_wifi_rssi").c_str(), wifiRssi.c_str(), true);
+  mqttClient.publish((base + "esp_reset_reason").c_str(), resetReason.c_str(), true);
+  mqttClient.publish((base + "esp_ip").c_str(), ip.c_str(), true);
+}
+
 String buildDeviceVersionString()
 {
     String hwVersion = "unknown";
@@ -885,6 +949,8 @@ void loop()
           deviceSwVersion = buildDeviceVersionString();
 
           publishSystemConfiguration();
+          publishEspDiagnosticsConfiguration();
+          espDiagnosticsPending = true;
       }
       else
       {
@@ -896,6 +962,15 @@ void loop()
     if(!mqttClient.loop())
     {
         return;
+    }
+
+    // Run ESP diagnostics independently of the Wavin polling interval.
+    if (espDiagnosticsPending ||
+        millis() - lastEspDiagnosticsTime >= ESP_DIAGNOSTICS_INTERVAL_MS)
+    {
+      publishEspDiagnostics();
+      lastEspDiagnosticsTime = millis();
+      espDiagnosticsPending = false;
     }
 
     if (millis() - lastUpdateTime >= POLL_TIME_MS)
@@ -1141,6 +1216,7 @@ void loop()
             // Primary element from controller is returned as index+1, so 1 is subtracted here
             if (wavinController.readRegisters(WavinController::CATEGORY_ELEMENTS, primaryElement-1, 0, 11, registers))
             {
+              thermostatReadSucceeded(channel);
               uint16_t temperature = registers[WavinController::EL_AIR_TEMP];
               uint16_t dewPoint    = registers[WavinController::EL_DEW_POINT];
               uint16_t humidity    = registers[WavinController::EL_HUMIDITY];

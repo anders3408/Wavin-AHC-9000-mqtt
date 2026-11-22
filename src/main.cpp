@@ -55,6 +55,36 @@ bool espDiagnosticsPending = true;
 const unsigned long MODBUS_DIAGNOSTICS_INTERVAL_MS = 60000UL;
 unsigned long lastModbusDiagnosticsTime = 0;
 bool modbusDiagnosticsPending = true;
+// Phase 3.4.5: runtime-controlled MQTT verbosity. OFF after every reboot.
+bool debugDiagnosticsEnabled = false;
+bool debugSnapshotPending = false;
+const char* DEBUG_COMMAND_SUFFIX = "/system/debug_diagnostics/set";
+const char* DEBUG_STATE_SUFFIX = "/system/debug_diagnostics/state";
+const char* DEBUG_AVAILABILITY_SUFFIX = "/system/debug_diagnostics/availability";
+
+String debugTopic(const char* suffix) { return MQTT_PREFIX + mqttDeviceNameWithMac + suffix; }
+void publishDebugAvailability()
+{
+  if (mqttClient.connected())
+    mqttClient.publish(debugTopic(DEBUG_AVAILABILITY_SUFFIX).c_str(),
+                       debugDiagnosticsEnabled ? "True" : "False", true);
+}
+void publishDebugState()
+{
+  if (mqttClient.connected())
+    mqttClient.publish(debugTopic(DEBUG_STATE_SUFFIX).c_str(),
+                       debugDiagnosticsEnabled ? "ON" : "OFF", true);
+}
+// HA requires both the device and debug mode to be available.
+String debugAvailabilityJson()
+{
+  return "\"availability\":[{\"topic\":\"" +
+    MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE +
+    "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\"}," +
+    "{\"topic\":\"" + debugTopic(DEBUG_AVAILABILITY_SUFFIX) +
+    "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\"}],\"availability_mode\":\"all\"";
+}
+
 String lastModbusStatusPublished;
 
 unsigned long lastWifiAttempt = 0;
@@ -170,6 +200,14 @@ bool parseTemperature(const String& payload, uint16_t& tenths)
   return true;
 }
 
+void publishModbusFailureDiagnostics();
+void publishModbusCategoryTimingDiagnostics();
+void publishModbusUartDiagnostics();
+void publishModbusRetryDiagnostics();
+void publishModbusDiagnostics(bool publishCounters);
+void publishThermostatMaxReadFailures(uint8_t channel);
+void publishDebugSnapshot();
+
 void mqttCallback(char* topic, byte* payload, unsigned int length)
 {
   if (length == 0 || length > 32) return;
@@ -178,6 +216,20 @@ void mqttCallback(char* topic, byte* payload, unsigned int length)
   terminatedPayload[length] = '\0';
   String value(terminatedPayload);
   String commandTopic(topic);
+  // Separate, exact-match debug command; never reaches heating write handlers.
+  if (commandTopic == debugTopic(DEBUG_COMMAND_SUFFIX)) {
+    if (value != "ON" && value != "OFF") return;
+    const bool next = value == "ON";
+    if (next != debugDiagnosticsEnabled) {
+      debugDiagnosticsEnabled = next;
+      publishDebugAvailability();
+      publishDebugState();
+      if (next) debugSnapshotPending = true;
+    } else {
+      publishDebugState();
+    }
+    return;
+  }
   uint8_t channel;
   bool success = false;
 
@@ -299,6 +351,7 @@ uint8_t thermostatReadFailures[
 uint8_t thermostatMaxReadFailures[WavinController::NUMBER_OF_CHANNELS] = {0};
 void publishThermostatMaxReadFailures(uint8_t channel)
 {
+    if (!debugDiagnosticsEnabled) return;
     const uint16_t failures = thermostatMaxReadFailures[channel];
     const String topic = MQTT_PREFIX + mqttDeviceNameWithMac + "/" +
                          String(channel) + "/read_failures_max";
@@ -718,8 +771,7 @@ void publishConfiguration(uint8_t channel)
       "{\"name\":\"" + roomName + " Modbus maks læsefejl i træk\"," +
       "\"unique_id\":\"" + maxReadFailuresKey + "_id\"," +
       "\"state_topic\":\"" + baseStateTopic + "/read_failures_max\"," +
-      "\"availability_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE + "\"," +
-      "\"payload_available\":\"True\",\"payload_not_available\":\"False\"," +
+      debugAvailabilityJson() + "," +
       "\"entity_category\":\"diagnostic\",\"state_class\":\"measurement\"," +
       "\"icon\":\"mdi:counter\",\"device\":" + deviceJson + "}";
 
@@ -1022,8 +1074,10 @@ void publishModbusDiagnosticsConfiguration()
     String message = "{\"name\":\"" + String(diagnostic.name) +
       "\",\"unique_id\":\"" + deviceId + "_" + diagnostic.key +
       "_id\",\"state_topic\":\"" + stateBase + diagnostic.key +
-      "\",\"availability_topic\":\"" + availability +
-      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\"," +
+      "\"," + ((String(diagnostic.key) == "modbus_success" || String(diagnostic.key) == "modbus_errors")
+        ? debugAvailabilityJson()
+        : String("\"availability_topic\":\"") + availability +
+          "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\"") + "," +
       String(diagnostic.extra) + "\"icon\":\"" + diagnostic.icon +
       "\",\"entity_category\":\"diagnostic\",\"device\":" + deviceJson + "}";
     mqttClient.publish(topic.c_str(), message.c_str(), true);
@@ -1031,6 +1085,54 @@ void publishModbusDiagnosticsConfiguration()
 }
 
 // Phase 3.4: Identify failing request addresses without extra controller reads.
+// Two always-on rates computed from physical and logical request counters.
+void publishModbusReliabilityConfiguration()
+{
+  const String id = mqttDeviceNameWithMac;
+  const String base = MQTT_PREFIX + id + "/system/";
+  const String availability = MQTT_PREFIX + id + MQTT_ONLINE;
+  const String device = "{\"identifiers\":[\"" + id + "\"],\"name\":\"Wavin AHC 9000\",\"manufacturer\":\"Wavin\",\"model\":\"AHC 9000\"}";
+  const char* keys[] = {"modbus_physical_failure_rate", "modbus_final_operation_failure_rate"};
+  const char* names[] = {"Wavin Modbus fysisk fejlrate", "Wavin Modbus endelig operationsfejlrate"};
+  for (uint8_t i = 0; i < 2; ++i) {
+    const String key(keys[i]);
+    const String json = "{\"name\":\"" + String(names[i]) +
+      "\",\"unique_id\":\"" + id + "_" + key + "_id\",\"state_topic\":\"" + base + key +
+      "\",\"availability_topic\":\"" + availability +
+      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\",\"unit_of_measurement\":\"%\",\"state_class\":\"measurement\",\"device\":" + device + "}";
+    mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), json.c_str(), true);
+  }
+}
+
+void publishModbusReliability()
+{
+  if (!mqttClient.connected()) return;
+  const auto d = wavinController.getModbusDiagnostics();
+  const auto r = wavinController.getReadRetryDiagnostics();
+  const uint64_t physicalTotal = (uint64_t)d.successes + d.errors;
+  // Every retry is an extra physical request, not an extra logical operation.
+  const uint64_t logicalTotal = physicalTotal >= r.attempts ? physicalTotal - r.attempts : 0;
+  const uint32_t finalErrors = d.errors >= r.recovered ? d.errors - r.recovered : 0;
+  const String base = MQTT_PREFIX + mqttDeviceNameWithMac + "/system/";
+  const String physicalRate = physicalTotal ? String(100.0 * (double)d.errors / (double)physicalTotal, 3) : "unknown";
+  const String finalRate = logicalTotal ? String(100.0 * (double)finalErrors / (double)logicalTotal, 3) : "unknown";
+  mqttClient.publish((base + "modbus_physical_failure_rate").c_str(), physicalRate.c_str(), true);
+  mqttClient.publish((base + "modbus_final_operation_failure_rate").c_str(), finalRate.c_str(), true);
+}
+
+void publishDebugSwitchConfiguration()
+{
+  const String id = mqttDeviceNameWithMac;
+  const String device = "{\"identifiers\":[\"" + id + "\"],\"name\":\"Wavin AHC 9000\",\"manufacturer\":\"Wavin\",\"model\":\"AHC 9000\"}";
+  const String json = "{\"name\":\"Wavin Debug diagnostics\",\"unique_id\":\"" + id +
+    "_debug_diagnostics_id\",\"command_topic\":\"" + debugTopic(DEBUG_COMMAND_SUFFIX) +
+    "\",\"state_topic\":\"" + debugTopic(DEBUG_STATE_SUFFIX) +
+    "\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"state_on\":\"ON\",\"state_off\":\"OFF\"," +
+    "\"availability_topic\":\"" + MQTT_PREFIX + id + MQTT_ONLINE +
+    "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"config\",\"icon\":\"mdi:bug\",\"device\":" + device + "}";
+  mqttClient.publish(("homeassistant/switch/" + id + "_debug_diagnostics/config").c_str(), json.c_str(), true);
+}
+
 void publishModbusFailureConfiguration()
 {
   const String id = mqttDeviceNameWithMac;
@@ -1046,8 +1148,7 @@ void publishModbusFailureConfiguration()
   for (uint8_t i = 0; i < 8; ++i) {
     const String key(keys[i]);
     String message = "{\"name\":\"" + String(names[i]) + "\",\"unique_id\":\"" + id + "_" + key +
-      "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
-      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\",";
+      "_id\",\"state_topic\":\"" + base + key + "\"," + debugAvailabilityJson() + ",\"entity_category\":\"diagnostic\",";
     if (i < 7) message += "\"state_class\":\"total_increasing\",";
     message += "\"device\":" + device + "}";
     const String topic = "homeassistant/sensor/" + id + "_" + key + "/config";
@@ -1094,8 +1195,7 @@ void publishModbusCategoryTimingConfiguration()
       const String key = "modbus_cat" + String(i) + (j == 0 ? "_success" : "_errors");
       const String name = "Modbus " + String(labels[i]) + (j == 0 ? " success" : " errors");
       const String message = "{\"name\":\"" + name + "\",\"unique_id\":\"" + id + "_" + key +
-        "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
-        "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\",\"state_class\":\"total_increasing\",\"device\":" + device + "}";
+        "_id\",\"state_topic\":\"" + base + key + "\"," + debugAvailabilityJson() + ",\"entity_category\":\"diagnostic\",\"state_class\":\"total_increasing\",\"device\":" + device + "}";
       mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), message.c_str(), true);
     }
   }
@@ -1104,16 +1204,14 @@ void publishModbusCategoryTimingConfiguration()
   for (uint8_t i = 0; i < 6; ++i) {
     const String key(keys[i]);
     const String message = "{\"name\":\"Wavin " + key + "\",\"unique_id\":\"" + id + "_" + key +
-      "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
-      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\",\"unit_of_measurement\":\"ms\",\"state_class\":\"measurement\",\"device\":" + device + "}";
+      "_id\",\"state_topic\":\"" + base + key + "\"," + debugAvailabilityJson() + ",\"entity_category\":\"diagnostic\",\"unit_of_measurement\":\"ms\",\"state_class\":\"measurement\",\"device\":" + device + "}";
     mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), message.c_str(), true);
   }
   const char* counters[] = {"modbus_first_byte_samples", "modbus_completed_responses", "modbus_no_byte_timeouts"};
   for (uint8_t i = 0; i < 3; ++i) {
     const String key(counters[i]);
     const String message = "{\"name\":\"Wavin " + key + "\",\"unique_id\":\"" + id + "_" + key +
-      "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
-      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\",\"state_class\":\"total_increasing\",\"device\":" + device + "}";
+      "_id\",\"state_topic\":\"" + base + key + "\"," + debugAvailabilityJson() + ",\"entity_category\":\"diagnostic\",\"state_class\":\"total_increasing\",\"device\":" + device + "}";
     mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), message.c_str(), true);
   }
 }
@@ -1151,8 +1249,7 @@ void publishModbusUartConfiguration()
   for (uint8_t i = 0; i < 6; ++i) {
     const String key(keys[i]);
     const String msg = "{\"name\":\"Wavin " + key + "\",\"unique_id\":\"" + id + "_" + key +
-      "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
-      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\"," +
+      "_id\",\"state_topic\":\"" + base + key + "\"," + debugAvailabilityJson() + ",\"entity_category\":\"diagnostic\"," +
       (i == 4 ? String("\"state_class\":\"measurement\",") : String("\"state_class\":\"total_increasing\",")) +
       "\"device\":" + device + "}";
     mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), msg.c_str(), true);
@@ -1171,8 +1268,7 @@ void publishModbusRetryConfiguration()
   for (uint8_t i = 0; i < 3; ++i) {
     const String key(keys[i]);
     const String message = "{\"name\":\"" + String(names[i]) + "\",\"unique_id\":\"" + id + "_" + key +
-      "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
-      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\"," +
+      "_id\",\"state_topic\":\"" + base + key + "\"," + debugAvailabilityJson() + ",\"entity_category\":\"diagnostic\"," +
       "\"state_class\":\"total_increasing\",\"device\":" + device + "}";
     mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), message.c_str(), true);
   }
@@ -1203,6 +1299,21 @@ void publishModbusUartDiagnostics()
     mqttClient.publish((base + keys[i]).c_str(), String(vals[i]).c_str(), true);
 }
 
+void publishDebugSnapshot()
+{
+  if (!debugDiagnosticsEnabled || !mqttClient.connected()) return;
+  publishModbusDiagnostics(true);
+  publishModbusFailureDiagnostics();
+  publishModbusCategoryTimingDiagnostics();
+  publishModbusUartDiagnostics();
+  publishModbusRetryDiagnostics();
+  // Force retained max values to refresh after debug was disabled.
+  for (uint8_t ch = 0; ch < WavinController::NUMBER_OF_CHANNELS; ++ch) {
+    lastPublishedMaxReadFailures[ch] = LAST_VALUE_UNKNOWN;
+    publishThermostatMaxReadFailures(ch);
+  }
+}
+
 String modbusStatus(const WavinController::ModbusDiagnostics& stats)
 {
   if (!stats.hasAttemptedTransaction) return "unknown";
@@ -1224,7 +1335,7 @@ void publishModbusDiagnostics(bool publishCounters)
       lastModbusStatusPublished = status;
   }
 
-  if (!publishCounters) return;
+  if (!publishCounters || !debugDiagnosticsEnabled) return;
   mqttClient.publish((base + "modbus_success").c_str(), String(stats.successes).c_str(), true);
   mqttClient.publish((base + "modbus_errors").c_str(), String(stats.errors).c_str(), true);
   mqttClient.publish((base + "modbus_consecutive_failures").c_str(), String(stats.consecutiveFailures).c_str(), true);
@@ -1305,6 +1416,7 @@ void loop()
           
           String modeSetTopic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/+" + MQTT_SUFFIX_MODE_SET);
           mqttClient.subscribe(modeSetTopic.c_str(), 1);
+          mqttClient.subscribe(debugTopic(DEBUG_COMMAND_SUFFIX).c_str(), 1);
           
           mqttClient.publish(will.c_str(), (const uint8_t *)"True", 4, true);
 
@@ -1321,6 +1433,10 @@ void loop()
           publishModbusCategoryTimingConfiguration();
           publishModbusUartConfiguration();
           publishModbusRetryConfiguration();
+          publishModbusReliabilityConfiguration();
+          publishDebugSwitchConfiguration();
+          publishDebugState();
+          publishDebugAvailability();
           publishThermostatSummaryConfiguration();
           lastThermostatLostCount = LAST_VALUE_UNKNOWN;
           lastThermostatUnknownCount = LAST_VALUE_UNKNOWN;
@@ -1338,6 +1454,11 @@ void loop()
     if(!mqttClient.loop())
     {
         return;
+    }
+
+    if (debugSnapshotPending && debugDiagnosticsEnabled) {
+      debugSnapshotPending = false;
+      publishDebugSnapshot();
     }
 
     // Run ESP diagnostics independently of the Wavin polling interval.
@@ -1702,18 +1823,22 @@ void loop()
       }
       // Publish the state transition after the full polling pass.
       publishModbusDiagnostics(false);
-      for (uint8_t ch = 0; ch < WavinController::NUMBER_OF_CHANNELS; ++ch)
-        publishThermostatMaxReadFailures(ch);
+      if (debugDiagnosticsEnabled)
+        for (uint8_t ch = 0; ch < WavinController::NUMBER_OF_CHANNELS; ++ch)
+          publishThermostatMaxReadFailures(ch);
       publishThermostatSummary();
     }
     if (modbusDiagnosticsPending ||
         millis() - lastModbusDiagnosticsTime >= MODBUS_DIAGNOSTICS_INTERVAL_MS)
     {
       publishModbusDiagnostics(true);
-      publishModbusFailureDiagnostics();
-      publishModbusCategoryTimingDiagnostics();
-      publishModbusUartDiagnostics();
-      publishModbusRetryDiagnostics();
+      publishModbusReliability();
+      if (debugDiagnosticsEnabled) {
+        publishModbusFailureDiagnostics();
+        publishModbusCategoryTimingDiagnostics();
+        publishModbusUartDiagnostics();
+        publishModbusRetryDiagnostics();
+      }
       lastModbusDiagnosticsTime = millis();
       modbusDiagnosticsPending = false;
     }

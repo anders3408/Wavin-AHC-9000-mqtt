@@ -70,6 +70,7 @@ struct lastKnownValue_t {
   uint16_t heatDemand;
   uint16_t lowBattery;
   uint16_t availability;
+  uint16_t thermostatState;
 
 } lastSentValues[WavinController::NUMBER_OF_CHANNELS];
 
@@ -84,6 +85,24 @@ struct lastSentSystem_t {
 lastSentSystem_t lastSentSystemValues;
 
 const uint16_t LAST_VALUE_UNKNOWN = 0xFFFF;
+
+enum ThermostatState : uint16_t {
+  THERMOSTAT_UNKNOWN = 0,
+  THERMOSTAT_ONLINE = 1,
+  THERMOSTAT_LOST = 2,
+  THERMOSTAT_UNASSIGNED = 3
+};
+
+const char* thermostatStateText(ThermostatState state)
+{
+  switch (state) {
+    case THERMOSTAT_ONLINE:     return "online";
+    case THERMOSTAT_LOST:       return "lost";
+    case THERMOSTAT_UNASSIGNED: return "unassigned";
+    default:                    return "unknown";
+  }
+}
+
 
 bool configurationPublished[WavinController::NUMBER_OF_CHANNELS];
 
@@ -193,6 +212,7 @@ void resetLastSentValues()
     lastSentValues[i].heatDemand = LAST_VALUE_UNKNOWN;
     lastSentValues[i].lowBattery = LAST_VALUE_UNKNOWN;
     lastSentValues[i].availability = LAST_VALUE_UNKNOWN;
+    lastSentValues[i].thermostatState = LAST_VALUE_UNKNOWN;
 
     configurationPublished[i] = false;
   }
@@ -222,6 +242,35 @@ void publishIfNewValue(String topic, String payload, uint16_t newValue, uint16_t
     }
   }
 }
+
+
+void publishThermostatState(
+    uint8_t channel,
+    ThermostatState state)
+{
+  String baseTopic =
+      MQTT_PREFIX + mqttDeviceNameWithMac +
+      "/" + String(channel);
+
+  publishIfNewValue(
+      baseTopic + "/thermostat_status",
+      thermostatStateText(state),
+      static_cast<uint16_t>(state),
+      &lastSentValues[channel].thermostatState
+  );
+
+  // Preserve the existing availability topic.
+  // Only confirmed online thermostats are available.
+  bool available = (state == THERMOSTAT_ONLINE);
+
+  publishIfNewValue(
+      baseTopic + MQTT_AVAILABILITY,
+      available ? "True" : "False",
+      available ? 1 : 0,
+      &lastSentValues[channel].availability
+  );
+}
+
 
 
 // Publish discovery messages for HomeAssistant
@@ -545,6 +594,22 @@ void publishConfiguration(uint8_t channel)
       "\"entity_category\":\"diagnostic\","
       "\"qos\":0"
     "}";
+  
+  String thermostatStatusTopicDisc =
+      "homeassistant/sensor/" +
+      mqttDeviceNameWithMac + "_" +
+      channelStr +
+      "_thermostat_status/config";
+
+  String thermostatStatusMessageDisc =
+      "{"
+        "\"name\":\"" + roomName + " thermostat status\","
+        "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_thermostat_status_id\","
+        "\"state_topic\":\"" + baseStateTopic + "/thermostat_status\","
+        "\"icon\":\"mdi:thermostat\","
+        "\"entity_category\":\"diagnostic\","
+        "\"device\":" + deviceJson +
+      "}";
 
   // =========================
   // Publish discovery
@@ -561,6 +626,7 @@ void publishConfiguration(uint8_t channel)
   mqttClient.publish(heatDemandTopic.c_str(), heatDemandMessage.c_str(), true);
   mqttClient.publish(lowBatteryTopic.c_str(), lowBatteryMessage.c_str(), true);
   mqttClient.publish(availabilityTopicDisc.c_str(), availabilityMessageDisc.c_str(), true);
+  mqttClient.publish(thermostatStatusTopicDisc.c_str(), thermostatStatusMessageDisc.c_str(), true);
 
   configurationPublished[channel] = true;
 }
@@ -916,11 +982,23 @@ void loop()
             String payload;
             if (primaryElement == 0)
             {
-              payload = "none";
+                publishThermostatState(
+                    channel,
+                    THERMOSTAT_UNASSIGNED
+                );
+                continue;
             }
             else
             {
               payload = String(elementIndex);
+            }
+
+            if (allThermostatsLost)
+            {
+                publishThermostatState(
+                    channel,
+                    THERMOSTAT_LOST
+                );
             }
 
             publishIfNewValue(
@@ -1105,6 +1183,13 @@ void loop()
               bool lowBatt   = status & WavinController::ELEMENT_STATUS_LOW_BATT;
               bool heatCall  = status & WavinController::ELEMENT_STATUS_TP_ACT;
 
+              ThermostatState state =
+                  (alive && !lost)
+                      ? THERMOSTAT_ONLINE
+                      : THERMOSTAT_LOST;
+
+              publishThermostatState(channel, state);
+
               // -------- heat_demand --------
               {
                 String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/heat_demand");
@@ -1128,23 +1213,16 @@ void loop()
                     &(lastSentValues[channel].lowBattery)
                 );
               }
-
-              // -------- availability (REAL, replaces hardcoded "online") --------
-              {
-                bool available = (alive && !lost);
-
-                String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/availability");
-
-                publishIfNewValue(
-                    topic,
-                    available ? "True" : "False",
-                    available ? 1 : 0,
-                    &(lastSentValues[channel].availability)
-                );
-              }
-
+            } else {
+              // Failed to read thermostat values, mark as unknown
+              publishThermostatState(channel, THERMOSTAT_UNKNOWN);
             }
           }
+        } else{
+            publishThermostatState(
+                channel,
+                THERMOSTAT_UNKNOWN
+            );
         }
 
         // Process incomming messages and maintain connection to the server

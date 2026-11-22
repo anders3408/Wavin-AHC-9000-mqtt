@@ -114,6 +114,7 @@ const char* thermostatStateText(ThermostatState state)
 
 
 bool configurationPublished[WavinController::NUMBER_OF_CHANNELS];
+uint16_t lastPublishedReadFailures[WavinController::NUMBER_OF_CHANNELS];
 
 
 // Only accept well-formed commands addressed to one of our 16 channels.
@@ -224,6 +225,7 @@ void resetLastSentValues()
     lastSentValues[i].thermostatState = LAST_VALUE_UNKNOWN;
 
     configurationPublished[i] = false;
+    lastPublishedReadFailures[i] = LAST_VALUE_UNKNOWN;
   }
 }
 
@@ -287,6 +289,18 @@ uint8_t thermostatReadFailures[
     WavinController::NUMBER_OF_CHANNELS
 ] = {0};
 
+// Phase 3.3: publish the existing per-channel failure counter as a
+// diagnostic, without adding any Wavin/Modbus reads.
+void publishThermostatReadFailures(uint8_t channel)
+{
+    const uint16_t failures = thermostatReadFailures[channel];
+    String topic = MQTT_PREFIX + mqttDeviceNameWithMac + "/" +
+                   String(channel) + "/read_failures";
+    publishIfNewValue(topic, String(failures), failures,
+                      &lastPublishedReadFailures[channel]);
+}
+
+
 // Count failed polls before reporting unknown.
 // Explicit Wavin "lost" status is still immediate.
 void thermostatReadFailed(uint8_t channel)
@@ -296,6 +310,8 @@ void thermostatReadFailed(uint8_t channel)
     {
         thermostatReadFailures[channel]++;
     }
+
+    publishThermostatReadFailures(channel);
 
     if (thermostatReadFailures[channel] >=
         THERMOSTAT_MAX_READ_FAILURES)
@@ -313,6 +329,7 @@ void thermostatReadFailed(uint8_t channel)
 void thermostatReadSucceeded(uint8_t channel)
 {
     thermostatReadFailures[channel] = 0;
+    publishThermostatReadFailures(channel);
 }
 
 // Publish discovery messages for HomeAssistant
@@ -653,6 +670,26 @@ void publishConfiguration(uint8_t channel)
         "\"device\":" + deviceJson +
       "}";
 
+  // Phase 3.3: per-channel consecutive thermostat read failures.
+  // This entity deliberately uses device-level availability, not thermostat
+  // availability: it remains visible while a thermostat is lost/unknown.
+  String readFailuresTopicDisc =
+      "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" +
+      channelStr + "_read_failures/config";
+  String readFailuresMessageDisc =
+      "{"
+        "\"name\":\"" + roomName + " Modbus læsefejl i træk\","
+        "\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + channelStr + "_read_failures_id\","
+        "\"state_topic\":\"" + baseStateTopic + "/read_failures\","
+        "\"availability_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE + "\","
+        "\"payload_available\":\"True\","
+        "\"payload_not_available\":\"False\","
+        "\"icon\":\"mdi:counter\","
+        "\"entity_category\":\"diagnostic\","
+        "\"state_class\":\"measurement\","
+        "\"device\":" + deviceJson +
+      "}";
+
   // =========================
   // Publish discovery
   // =========================
@@ -669,8 +706,54 @@ void publishConfiguration(uint8_t channel)
   mqttClient.publish(lowBatteryTopic.c_str(), lowBatteryMessage.c_str(), true);
   mqttClient.publish(availabilityTopicDisc.c_str(), availabilityMessageDisc.c_str(), true);
   mqttClient.publish(thermostatStatusTopicDisc.c_str(), thermostatStatusMessageDisc.c_str(), true);
+  mqttClient.publish(readFailuresTopicDisc.c_str(), readFailuresMessageDisc.c_str(), true);
 
   configurationPublished[channel] = true;
+}
+
+// Phase 3.3: system-wide summary derived from published thermostat states.
+// Values are cached locally; no additional Modbus transactions are made.
+uint16_t lastThermostatLostCount = LAST_VALUE_UNKNOWN;
+uint16_t lastThermostatUnknownCount = LAST_VALUE_UNKNOWN;
+
+void publishThermostatSummary()
+{
+  uint16_t lost = 0;
+  uint16_t unknown = 0;
+  for (uint8_t channel = 0; channel < WavinController::NUMBER_OF_CHANNELS; ++channel)
+  {
+    const uint16_t state = lastSentValues[channel].thermostatState;
+    if (state == THERMOSTAT_LOST) ++lost;
+    else if (state == THERMOSTAT_UNKNOWN) ++unknown;
+  }
+  const String base = MQTT_PREFIX + mqttDeviceNameWithMac + "/system/";
+  publishIfNewValue(base + "thermostats_lost", String(lost), lost,
+                    &lastThermostatLostCount);
+  publishIfNewValue(base + "thermostats_unknown", String(unknown), unknown,
+                    &lastThermostatUnknownCount);
+}
+
+void publishThermostatSummaryConfiguration()
+{
+  const String base = MQTT_PREFIX + mqttDeviceNameWithMac + "/system/";
+  const String availability = MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE;
+  const String device = "{\"identifiers\":[\"" + mqttDeviceNameWithMac +
+                        "\"],\"name\":\"Wavin AHC 9000\",\"manufacturer\":\"Wavin\",\"model\":\"AHC 9000\"}";
+  const char* keys[] = {"thermostats_lost", "thermostats_unknown"};
+  const char* names[] = {"Mistede termostater", "Termostater med ukendt status"};
+  for (uint8_t i = 0; i < 2; ++i)
+  {
+    String key = keys[i];
+    String topic = "homeassistant/sensor/" + mqttDeviceNameWithMac + "_" + key + "/config";
+    String json = "{\"name\":\"" + String(names[i]) +
+                  "\",\"unique_id\":\"" + mqttDeviceNameWithMac + "_" + key +
+                  "_id\",\"state_topic\":\"" + base + key +
+                  "\",\"availability_topic\":\"" + availability +
+                  "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\","
+                  "\"entity_category\":\"diagnostic\",\"icon\":\"mdi:thermostat-alert\","
+                  "\"state_class\":\"measurement\",\"device\":" + device + "}";
+    mqttClient.publish(topic.c_str(), json.c_str(), true);
+  }
 }
 
 void publishSystemConfiguration()
@@ -1027,6 +1110,9 @@ void loop()
           publishSystemConfiguration();
           publishEspDiagnosticsConfiguration();
           publishModbusDiagnosticsConfiguration();
+          publishThermostatSummaryConfiguration();
+          lastThermostatLostCount = LAST_VALUE_UNKNOWN;
+          lastThermostatUnknownCount = LAST_VALUE_UNKNOWN;
           modbusDiagnosticsPending = true;
           lastModbusStatusPublished = "";
           espDiagnosticsPending = true;
@@ -1405,6 +1491,7 @@ void loop()
       }
       // Publish the state transition after the full polling pass.
       publishModbusDiagnostics(false);
+      publishThermostatSummary();
     }
     if (modbusDiagnosticsPending ||
         millis() - lastModbusDiagnosticsTime >= MODBUS_DIAGNOSTICS_INTERVAL_MS)

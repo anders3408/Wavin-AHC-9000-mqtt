@@ -272,6 +272,39 @@ void publishThermostatState(
 }
 
 
+const uint8_t THERMOSTAT_MAX_READ_FAILURES = 3;
+
+uint8_t thermostatReadFailures[
+    WavinController::NUMBER_OF_CHANNELS
+] = {0};
+
+// Count failed polls before reporting unknown.
+// Explicit Wavin "lost" status is still immediate.
+void thermostatReadFailed(uint8_t channel)
+{
+    if (thermostatReadFailures[channel] <
+        THERMOSTAT_MAX_READ_FAILURES)
+    {
+        thermostatReadFailures[channel]++;
+    }
+
+    if (thermostatReadFailures[channel] >=
+        THERMOSTAT_MAX_READ_FAILURES)
+    {
+        publishThermostatState(
+            channel,
+            THERMOSTAT_UNKNOWN
+        );
+    }
+}
+
+
+// Reset the consecutive communication failure count after a valid read,
+// or when the controller explicitly reports a known thermostat condition.
+void thermostatReadSucceeded(uint8_t channel)
+{
+    thermostatReadFailures[channel] = 0;
+}
 
 // Publish discovery messages for HomeAssistant
 // See https://www.home-assistant.io/docs/mqtt/discovery/
@@ -971,48 +1004,34 @@ void loop()
           bool alarmLow  = registers[0] & WavinController::CH_PRI_ALARM_LOW;
 
           // ==========================
-          // Room sensor mapping (NEW)
+          // Room sensor mapping
           // ==========================
+          // Keep publishing "none" for unassigned channels. The cache value
+          // 0xFFFE is distinct from LAST_VALUE_UNKNOWN (0xFFFF).
           {
-            // Convert to 0-based index (0 means "not used")
-            uint16_t elementIndex = (primaryElement > 0) ? (primaryElement - 1) : 0xFFFF;
-
-            String topic = String(MQTT_PREFIX + mqttDeviceNameWithMac + "/" + channel + "/room_sensor");
-
-            String payload;
-            if (primaryElement == 0)
-            {
-                publishThermostatState(
-                    channel,
-                    THERMOSTAT_UNASSIGNED
-                );
-                continue;
-            }
-            else
-            {
-              payload = String(elementIndex);
-            }
-
-            if (allThermostatsLost)
-            {
-                publishThermostatState(
-                    channel,
-                    THERMOSTAT_LOST
-                );
-            }
-
-            publishIfNewValue(
-                topic,
-                payload,
-                elementIndex,
-                &(lastSentValues[channel].roomSensor)
-            );
+            const uint16_t elementIndex = (primaryElement > 0)
+                ? (primaryElement - 1) : 0xFFFE;
+            String topic = MQTT_PREFIX + mqttDeviceNameWithMac +
+                           "/" + String(channel) + "/room_sensor";
+            String payload = (primaryElement == 0)
+                ? "none" : String(elementIndex);
+            publishIfNewValue(topic, payload, elementIndex,
+                              &lastSentValues[channel].roomSensor);
           }
 
-          if(primaryElement==0)
+          if (primaryElement == 0)
           {
-              // Channel not used
-              continue;
+            thermostatReadSucceeded(channel);
+            publishThermostatState(channel, THERMOSTAT_UNASSIGNED);
+            continue;
+          }
+
+          // The controller's explicit lost flag takes precedence over
+          // individual element status. Continue reading channel-level data.
+          if (allThermostatsLost)
+          {
+            thermostatReadSucceeded(channel);
+            publishThermostatState(channel, THERMOSTAT_LOST);
           }
 
           if(!configurationPublished[channel])
@@ -1214,15 +1233,13 @@ void loop()
                 );
               }
             } else {
-              // Failed to read thermostat values, mark as unknown
-              publishThermostatState(channel, THERMOSTAT_UNKNOWN);
+              // A transient Modbus failure should not immediately make
+              // the thermostat unavailable in Home Assistant.
+              thermostatReadFailed(channel);
             }
           }
-        } else{
-            publishThermostatState(
-                channel,
-                THERMOSTAT_UNKNOWN
-            );
+        } else {
+            thermostatReadFailed(channel);
         }
 
         // Process incomming messages and maintain connection to the server

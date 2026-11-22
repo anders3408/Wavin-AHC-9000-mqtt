@@ -9,6 +9,18 @@ class WavinController
     bool writeRegister(uint8_t category, uint8_t page, uint8_t index, uint16_t value);
     bool writeMaskedRegister(uint8_t category, uint8_t page, uint8_t index, uint16_t value, uint16_t mask);
 
+    // Phase 3.2: RAM-only counters for actual Modbus transactions.
+    // Values reset when the ESP8266 reboots and wrap at uint32_t max.
+    struct ModbusDiagnostics {
+      uint32_t successes;
+      uint32_t errors;
+      uint32_t consecutiveFailures;
+      unsigned long lastSuccessMs;
+      bool hasSuccessfulTransaction;
+      bool hasAttemptedTransaction;
+    };
+    ModbusDiagnostics getModbusDiagnostics() const;
+
     // NEW helper methods
     bool getPumpState(uint8_t& tevent);
     bool getInletTemperature(float& temp);
@@ -106,6 +118,8 @@ class WavinController
 
 
   private:
+    ModbusDiagnostics modbusDiagnostics = {0, 0, 0, 0, false, false};
+    void recordTransaction(bool successful);
     uint8_t txEnablePin;
     uint16_t recieveTimeoutMs;
     void transmit(uint8_t *data, uint8_t lenght);

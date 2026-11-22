@@ -48,6 +48,12 @@ const unsigned long MQTT_RETRY_MS = 5000;
 const unsigned long ESP_DIAGNOSTICS_INTERVAL_MS = 60000;
 unsigned long lastEspDiagnosticsTime = 0;
 bool espDiagnosticsPending = true;
+// Phase 3.2: Publish controller link diagnostics on a separate cadence.
+const unsigned long MODBUS_DIAGNOSTICS_INTERVAL_MS = 60000UL;
+unsigned long lastModbusDiagnosticsTime = 0;
+bool modbusDiagnosticsPending = true;
+String lastModbusStatusPublished;
+
 unsigned long lastWifiAttempt = 0;
 unsigned long lastMqttAttempt = 0;
 const bool CONFIGURE_STANDBY_ON_DISCOVERY = false; // Opt-in: avoids changing controller on reboot
@@ -869,6 +875,76 @@ void publishEspDiagnostics()
   mqttClient.publish((base + "esp_ip").c_str(), ip.c_str(), true);
 }
 
+// Phase 3.2: Actual Modbus transaction counters, including writes and helper reads.
+// No additional Wavin register requests are made for these diagnostics.
+void publishModbusDiagnosticsConfiguration()
+{
+  const String deviceId = mqttDeviceNameWithMac;
+  const String availability = MQTT_PREFIX + deviceId + MQTT_ONLINE;
+  const String stateBase = MQTT_PREFIX + deviceId + "/system/";
+  const String deviceJson = "{\"manufacturer\":\"Wavin\",\"model\":\"AHC 9000\",\"sw_version\":\"" +
+                            deviceSwVersion + "\",\"name\":\"Wavin AHC 9000\",\"identifiers\":[\"" + deviceId + "\"]}";
+
+  struct DiagnosticDefinition {
+    const char* key;
+    const char* name;
+    const char* icon;
+    const char* extra;
+  };
+  const DiagnosticDefinition diagnostics[] = {
+    {"modbus_success", "Wavin Modbus succesfulde transaktioner", "mdi:check-network-outline", "\"state_class\":\"total_increasing\","},
+    {"modbus_errors", "Wavin Modbus fejl", "mdi:alert-circle-outline", "\"state_class\":\"total_increasing\","},
+    {"modbus_consecutive_failures", "Wavin Modbus fejl i træk", "mdi:counter", "\"state_class\":\"measurement\","},
+    {"modbus_last_success_age", "Wavin Modbus sekunder siden svar", "mdi:clock-alert-outline", "\"unit_of_measurement\":\"s\",\"device_class\":\"duration\",\"state_class\":\"measurement\","},
+    {"modbus_status", "Wavin Modbus forbindelse", "mdi:lan-connect", ""}
+  };
+
+  for (const auto& diagnostic : diagnostics)
+  {
+    String topic = "homeassistant/sensor/" + deviceId + "_" + diagnostic.key + "/config";
+    String message = "{\"name\":\"" + String(diagnostic.name) +
+      "\",\"unique_id\":\"" + deviceId + "_" + diagnostic.key +
+      "_id\",\"state_topic\":\"" + stateBase + diagnostic.key +
+      "\",\"availability_topic\":\"" + availability +
+      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\"," +
+      String(diagnostic.extra) + "\"icon\":\"" + diagnostic.icon +
+      "\",\"entity_category\":\"diagnostic\",\"device\":" + deviceJson + "}";
+    mqttClient.publish(topic.c_str(), message.c_str(), true);
+  }
+}
+
+String modbusStatus(const WavinController::ModbusDiagnostics& stats)
+{
+  if (!stats.hasAttemptedTransaction) return "unknown";
+  if (!stats.hasSuccessfulTransaction) return "offline";
+  if (stats.consecutiveFailures >= 3) return "offline";
+  if (stats.consecutiveFailures > 0) return "degraded";
+  return "online";
+}
+
+void publishModbusDiagnostics(bool publishCounters)
+{
+  if (!mqttClient.connected()) return;
+  const String base = MQTT_PREFIX + mqttDeviceNameWithMac + "/system/";
+  const WavinController::ModbusDiagnostics stats = wavinController.getModbusDiagnostics();
+  const String status = modbusStatus(stats);
+  if (modbusDiagnosticsPending || status != lastModbusStatusPublished)
+  {
+    if (mqttClient.publish((base + "modbus_status").c_str(), status.c_str(), true))
+      lastModbusStatusPublished = status;
+  }
+
+  if (!publishCounters) return;
+  mqttClient.publish((base + "modbus_success").c_str(), String(stats.successes).c_str(), true);
+  mqttClient.publish((base + "modbus_errors").c_str(), String(stats.errors).c_str(), true);
+  mqttClient.publish((base + "modbus_consecutive_failures").c_str(), String(stats.consecutiveFailures).c_str(), true);
+  // No valid age until a successful reply has been received.
+  // Publish 'unknown' explicitly rather than an invented age.
+  const String age = stats.hasSuccessfulTransaction
+    ? String((millis() - stats.lastSuccessMs) / 1000UL) : "unknown";
+  mqttClient.publish((base + "modbus_last_success_age").c_str(), age.c_str(), true);
+}
+
 String buildDeviceVersionString()
 {
     String hwVersion = "unknown";
@@ -950,6 +1026,9 @@ void loop()
 
           publishSystemConfiguration();
           publishEspDiagnosticsConfiguration();
+          publishModbusDiagnosticsConfiguration();
+          modbusDiagnosticsPending = true;
+          lastModbusStatusPublished = "";
           espDiagnosticsPending = true;
       }
       else
@@ -1324,6 +1403,15 @@ void loop()
             return;
         }
       }
+      // Publish the state transition after the full polling pass.
+      publishModbusDiagnostics(false);
+    }
+    if (modbusDiagnosticsPending ||
+        millis() - lastModbusDiagnosticsTime >= MODBUS_DIAGNOSTICS_INTERVAL_MS)
+    {
+      publishModbusDiagnostics(true);
+      lastModbusDiagnosticsTime = millis();
+      modbusDiagnosticsPending = false;
     }
   }
 }

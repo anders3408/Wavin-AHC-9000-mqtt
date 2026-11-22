@@ -19,6 +19,29 @@ WavinController::WavinController(uint8_t pin, bool swapSerialPins, uint16_t time
 }
 
 
+WavinController::ModbusDiagnostics WavinController::getModbusDiagnostics() const
+{
+  return modbusDiagnostics;
+}
+
+void WavinController::recordTransaction(bool successful)
+{
+  modbusDiagnostics.hasAttemptedTransaction = true;
+  if (successful)
+  {
+    ++modbusDiagnostics.successes;
+    modbusDiagnostics.consecutiveFailures = 0;
+    modbusDiagnostics.lastSuccessMs = millis();
+    modbusDiagnostics.hasSuccessfulTransaction = true;
+  }
+  else
+  {
+    ++modbusDiagnostics.errors;
+    if (modbusDiagnostics.consecutiveFailures != UINT32_MAX)
+      ++modbusDiagnostics.consecutiveFailures;
+  }
+}
+
 unsigned int WavinController::calculateCRC(uint8_t *frame, uint8_t bufferSize)
 {
   uint16_t temp = 0xFFFF;
@@ -138,7 +161,9 @@ bool WavinController::readRegisters(uint8_t category, uint8_t page, uint8_t inde
 
   transmit(message, 8);
 
-  return receive(reply, MODBUS_READ_REGISTER, count);
+  bool ok = receive(reply, MODBUS_READ_REGISTER, count);
+  recordTransaction(ok);
+  return ok;
 }
 
 
@@ -163,7 +188,9 @@ bool WavinController::writeRegister(uint8_t category, uint8_t page, uint8_t inde
   transmit(message, 10);
 
   uint16_t reply[1];
-  return receive(reply, MODBUS_WRITE_REGISTER, 1); // Receive reply but ignore it. Assume it's ok
+  bool ok = receive(reply, MODBUS_WRITE_REGISTER, 1);
+  recordTransaction(ok);
+  return ok; // Receive reply but ignore its register value
 }
 
 bool WavinController::writeMaskedRegister(uint8_t category, uint8_t page, uint8_t index, uint16_t value, uint16_t mask)
@@ -189,7 +216,9 @@ bool WavinController::writeMaskedRegister(uint8_t category, uint8_t page, uint8_
   transmit(message, 12);
 
   uint16_t reply[1];
-  return receive(reply, MODBUS_WRITE_MASKED_REGISTER, 1); // Receive reply but ignore it. Assume it's ok
+  bool ok = receive(reply, MODBUS_WRITE_MASKED_REGISTER, 1);
+  recordTransaction(ok);
+  return ok; // Receive reply but ignore its register value
 }
 
 bool WavinController::getPumpState(uint8_t& tevent)

@@ -47,6 +47,7 @@ bool WavinController::receive(
   uint8_t cmdtype,
   uint8_t expectedRegisterCount)
 {
+  if (expectedRegisterCount == 0 || expectedRegisterCount > 22) return false;
   uint8_t buffer[RECIEVE_BUFFER_SIZE];
   uint8_t n = 0;
   unsigned long start_time = millis();
@@ -57,6 +58,7 @@ bool WavinController::receive(
     {
       buffer[n] = Serial.read();
       n++;
+      if (n >= 3 && buffer[2] > RECIEVE_BUFFER_SIZE - 5) return false;
 
       if (n > 5 &&
           buffer[0] == MODBUS_DEVICE &&

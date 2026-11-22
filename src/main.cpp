@@ -118,6 +118,7 @@ const char* thermostatStateText(ThermostatState state)
 
 bool configurationPublished[WavinController::NUMBER_OF_CHANNELS];
 uint16_t lastPublishedReadFailures[WavinController::NUMBER_OF_CHANNELS];
+uint16_t lastPublishedMaxReadFailures[WavinController::NUMBER_OF_CHANNELS];
 
 
 // Only accept well-formed commands addressed to one of our 16 channels.
@@ -229,6 +230,7 @@ void resetLastSentValues()
 
     configurationPublished[i] = false;
     lastPublishedReadFailures[i] = LAST_VALUE_UNKNOWN;
+    lastPublishedMaxReadFailures[i] = LAST_VALUE_UNKNOWN;
   }
 }
 
@@ -292,6 +294,19 @@ uint8_t thermostatReadFailures[
     WavinController::NUMBER_OF_CHANNELS
 ] = {0};
 
+// Maximum consecutive failures seen since boot; unlike read_failures,
+// this is not reset after a successful read.
+uint8_t thermostatMaxReadFailures[WavinController::NUMBER_OF_CHANNELS] = {0};
+void publishThermostatMaxReadFailures(uint8_t channel)
+{
+    const uint16_t failures = thermostatMaxReadFailures[channel];
+    const String topic = MQTT_PREFIX + mqttDeviceNameWithMac + "/" +
+                         String(channel) + "/read_failures_max";
+    publishIfNewValue(topic, String(failures), failures,
+                      &lastPublishedMaxReadFailures[channel]);
+}
+
+
 // Phase 3.3: publish the existing per-channel failure counter as a
 // diagnostic, without adding any Wavin/Modbus reads.
 void publishThermostatReadFailures(uint8_t channel)
@@ -314,6 +329,10 @@ void thermostatReadFailed(uint8_t channel)
         thermostatReadFailures[channel]++;
     }
 
+    if (thermostatReadFailures[channel] > thermostatMaxReadFailures[channel]) {
+        thermostatMaxReadFailures[channel] = thermostatReadFailures[channel];
+        publishThermostatMaxReadFailures(channel);
+    }
     publishThermostatReadFailures(channel);
 
     if (thermostatReadFailures[channel] >=
@@ -693,6 +712,17 @@ void publishConfiguration(uint8_t channel)
         "\"device\":" + deviceJson +
       "}";
 
+  const String maxReadFailuresKey = mqttDeviceNameWithMac + "_" + channelStr + "_read_failures_max";
+  const String maxReadFailuresDiscovery = "homeassistant/sensor/" + maxReadFailuresKey + "/config";
+  const String maxReadFailuresMessage =
+      "{\"name\":\"" + roomName + " Modbus maks læsefejl i træk\"," +
+      "\"unique_id\":\"" + maxReadFailuresKey + "_id\"," +
+      "\"state_topic\":\"" + baseStateTopic + "/read_failures_max\"," +
+      "\"availability_topic\":\"" + MQTT_PREFIX + mqttDeviceNameWithMac + MQTT_ONLINE + "\"," +
+      "\"payload_available\":\"True\",\"payload_not_available\":\"False\"," +
+      "\"entity_category\":\"diagnostic\",\"state_class\":\"measurement\"," +
+      "\"icon\":\"mdi:counter\",\"device\":" + deviceJson + "}";
+
   // =========================
   // Publish discovery
   // =========================
@@ -710,6 +740,7 @@ void publishConfiguration(uint8_t channel)
   mqttClient.publish(availabilityTopicDisc.c_str(), availabilityMessageDisc.c_str(), true);
   mqttClient.publish(thermostatStatusTopicDisc.c_str(), thermostatStatusMessageDisc.c_str(), true);
   mqttClient.publish(readFailuresTopicDisc.c_str(), readFailuresMessageDisc.c_str(), true);
+  mqttClient.publish(maxReadFailuresDiscovery.c_str(), maxReadFailuresMessage.c_str(), true);
 
   configurationPublished[channel] = true;
 }
@@ -1108,6 +1139,41 @@ void publishModbusCategoryTimingDiagnostics()
     mqttClient.publish((base + keys[i]).c_str(), String(values[i]).c_str(), true);
 }
 
+void publishModbusUartConfiguration()
+{
+  const String id = mqttDeviceNameWithMac;
+  const String base = MQTT_PREFIX + id + "/system/";
+  const String availability = MQTT_PREFIX + id + MQTT_ONLINE;
+  const String device = "{\"identifiers\":[\"" + id + "\"],\"name\":\"Wavin AHC 9000\",\"manufacturer\":\"Wavin\",\"model\":\"AHC 9000\"}";
+  const char* keys[] = {"modbus_uart_discarded_bytes", "modbus_uart_nonempty_flushes",
+    "modbus_uart_partial_failures", "modbus_uart_partial_bytes",
+    "modbus_uart_max_partial_bytes", "modbus_uart_zero_byte_failures"};
+  for (uint8_t i = 0; i < 6; ++i) {
+    const String key(keys[i]);
+    const String msg = "{\"name\":\"Wavin " + key + "\",\"unique_id\":\"" + id + "_" + key +
+      "_id\",\"state_topic\":\"" + base + key + "\",\"availability_topic\":\"" + availability +
+      "\",\"payload_available\":\"True\",\"payload_not_available\":\"False\",\"entity_category\":\"diagnostic\"," +
+      (i == 4 ? String("\"state_class\":\"measurement\",") : String("\"state_class\":\"total_increasing\",")) +
+      "\"device\":" + device + "}";
+    mqttClient.publish(("homeassistant/sensor/" + id + "_" + key + "/config").c_str(), msg.c_str(), true);
+  }
+}
+
+void publishModbusUartDiagnostics()
+{
+  if (!mqttClient.connected()) return;
+  const auto d = wavinController.getUartDiagnostics();
+  const String base = MQTT_PREFIX + mqttDeviceNameWithMac + "/system/";
+  const char* keys[] = {"modbus_uart_discarded_bytes", "modbus_uart_nonempty_flushes",
+    "modbus_uart_partial_failures", "modbus_uart_partial_bytes",
+    "modbus_uart_max_partial_bytes", "modbus_uart_zero_byte_failures"};
+  const uint32_t vals[] = {d.preTransmitDiscardedBytes, d.preTransmitNonemptyFlushes,
+    d.partialResponseFailures, d.partialResponseBytes, d.maxPartialResponseBytes,
+    d.zeroByteFailures};
+  for (uint8_t i = 0; i < 6; ++i)
+    mqttClient.publish((base + keys[i]).c_str(), String(vals[i]).c_str(), true);
+}
+
 String modbusStatus(const WavinController::ModbusDiagnostics& stats)
 {
   if (!stats.hasAttemptedTransaction) return "unknown";
@@ -1224,6 +1290,7 @@ void loop()
           publishModbusDiagnosticsConfiguration();
           publishModbusFailureConfiguration();
           publishModbusCategoryTimingConfiguration();
+          publishModbusUartConfiguration();
           publishThermostatSummaryConfiguration();
           lastThermostatLostCount = LAST_VALUE_UNKNOWN;
           lastThermostatUnknownCount = LAST_VALUE_UNKNOWN;
@@ -1605,6 +1672,8 @@ void loop()
       }
       // Publish the state transition after the full polling pass.
       publishModbusDiagnostics(false);
+      for (uint8_t ch = 0; ch < WavinController::NUMBER_OF_CHANNELS; ++ch)
+        publishThermostatMaxReadFailures(ch);
       publishThermostatSummary();
     }
     if (modbusDiagnosticsPending ||
@@ -1613,6 +1682,7 @@ void loop()
       publishModbusDiagnostics(true);
       publishModbusFailureDiagnostics();
       publishModbusCategoryTimingDiagnostics();
+      publishModbusUartDiagnostics();
       lastModbusDiagnosticsTime = millis();
       modbusDiagnosticsPending = false;
     }

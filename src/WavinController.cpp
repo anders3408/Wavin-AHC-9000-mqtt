@@ -40,6 +40,11 @@ WavinController::ResponseTimingDiagnostics WavinController::getResponseTimingDia
   return responseTimingDiagnostics;
 }
 
+WavinController::UartDiagnostics WavinController::getUartDiagnostics() const
+{
+  return uartDiagnostics;
+}
+
 void WavinController::recordRequestResult(bool successful, uint8_t command,
     uint8_t category, uint8_t page, uint8_t index, uint8_t count)
 {
@@ -198,7 +203,15 @@ bool WavinController::receive(
   }
 
   // A partial or unexpected reply may be a header mismatch, rather than silence.
-  if (n > 0) receiveFailureReason = 4;
+  if (n > 0) {
+    receiveFailureReason = 4;
+    ++uartDiagnostics.partialResponseFailures;
+    uartDiagnostics.partialResponseBytes += n;
+    if (n > uartDiagnostics.maxPartialResponseBytes)
+      uartDiagnostics.maxPartialResponseBytes = n;
+  } else {
+    ++uartDiagnostics.zeroByteFailures;
+  }
   return false;
 }
 
@@ -215,7 +228,14 @@ void WavinController::transmit(uint8_t *data, uint8_t length)
   }
 
   // Empty recieve buffer before sending
-  while (Serial.read() != -1);
+  uint16_t discarded = 0;
+  while (Serial.read() != -1) {
+    ++discarded;
+  }
+  if (discarded) {
+    ++uartDiagnostics.preTransmitNonemptyFlushes;
+    uartDiagnostics.preTransmitDiscardedBytes += discarded;
+  }
 
   digitalWrite(txEnablePin, HIGH);
 

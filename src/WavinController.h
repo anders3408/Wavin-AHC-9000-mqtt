@@ -61,6 +61,19 @@ class WavinController
     CategoryDiagnostics getCategoryDiagnostics(uint8_t category) const;
     ResponseTimingDiagnostics getResponseTimingDiagnostics() const;
 
+    // Passive UART diagnostics. Bytes discarded before transmit may be late
+    // replies or noise; they are not proof of a direction-control fault.
+    struct UartDiagnostics {
+      uint32_t preTransmitDiscardedBytes;
+      uint32_t preTransmitNonemptyFlushes;
+      uint32_t partialResponseFailures;
+      uint32_t partialResponseBytes;
+      uint32_t maxPartialResponseBytes;
+      uint32_t zeroByteFailures;
+    };
+    UartDiagnostics getUartDiagnostics() const;
+
+
 
 
     // NEW helper methods
@@ -169,6 +182,7 @@ class WavinController
     ModbusFailureDetails failureDetails = {};
     CategoryDiagnostics categoryDiagnostics[DIAGNOSTIC_CATEGORY_COUNT] = {};
     ResponseTimingDiagnostics responseTimingDiagnostics = {};
+    UartDiagnostics uartDiagnostics = {};
     bool responseFirstByteSeen = false;
     uint32_t responseFirstByteMs = 0;
     uint32_t responseCompleteMs = 0;
